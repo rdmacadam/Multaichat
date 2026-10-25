@@ -47,7 +47,7 @@ js/
   core/util.js        MC.util     — ids, escapeHtml, debounce, formatCost
   core/storage.js     MC.storage  — settings (localStorage), conversations (IndexedDB)
   core/openrouter.js  MC.api      — fetchModels(), streamChat(), complete()
-  core/models.js      MC.models   — cache, recommend(), filter/search (pure)
+  core/models.js      MC.models   — cache, sections(), search(), filter/sort (pure)
   core/conversation.js MC.conv    — data model ops: lanes, turns, fork, thread building (pure)
   core/clarify.js     MC.clarify  — detect clarifying questions (pure)
   core/fusion.js      MC.fusion   — TL;DR + Fusion prompt building and JSON parsing (pure)
