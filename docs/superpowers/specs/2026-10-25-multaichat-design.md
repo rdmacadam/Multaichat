@@ -117,18 +117,57 @@ Turns where the lane wasn't asked are skipped entirely.
   back to the cached copy, then to a tiny built-in fallback list.
 - Only text-output models are listed
   (`architecture.output_modalities` includes `text`).
-- **Recommended** (`MC.models.recommend(models)`), rule-based, no hardcoded IDs:
-  for each provider prefix in
-  `anthropic, openai, google, x-ai, deepseek, meta-llama, mistralai, qwen`
-  pick the newest model by `created`, excluding ids containing `:free`,
-  `preview`, `beta`, `-exp`, `:extended`, `audio`, `image`, `embed`, and models
-  with `context_length < 32000`. Result is ordered by provider list.
-- Full list: search by name/id, filters "free only", "max $/M tokens",
-  sort by newest / price / context. Each row shows provider, context length,
-  input/output price per million tokens.
-- Selection (ordered list of model ids), summary model, and fusion model persist
-  in settings. First-run defaults: first 3 recommended models; summary model =
-  cheapest recommended; fusion model = first recommended.
+
+### Search bar
+
+- A search field is pinned at the top of the picker dialog and focused on open
+  (`/` or Ctrl/Cmd+K opens the picker from anywhere). It filters live
+  (debounced 100 ms) across **all** models and all sections.
+- Matching is case-insensitive over model name, id, and provider; multiple words
+  must all match (`"qwen coder"`, `"llama 70b"`). Results rank exact id/name
+  prefix matches first, then newest.
+- Token filters typed into the same box: `free`, `open`, `new`
+  (e.g. `"open coder"`, `"free llama"`).
+- Keyboard: ↑/↓ move, Enter or Space toggles selection, Esc closes.
+- A compact "+ Add model" search combobox also sits in the lane header bar for
+  adding a model mid-chat without opening the full dialog.
+
+### Suggested sections (shown when the search box is empty)
+
+All rule-based on live data, no hardcoded model ids, so new releases appear
+automatically. A model may appear in more than one section.
+
+1. **Top picks** — newest model per flagship provider
+   (`anthropic, openai, google, x-ai, deepseek, meta-llama, mistralai, qwen`).
+2. **Free** — every model whose id ends in `:free` or whose prompt and
+   completion price are both `0`, newest first. The first 12 are shown with
+   "Show all free (n)".
+3. **Open-weight: new & powerful** — models with a non-empty `hugging_face_id`
+   (OpenRouter's marker for open-weight models), released within the last
+   180 days, at most 2 per provider, newest first, top 12, with
+   "Show all open-weight (n)". Ties are broken by larger `context_length`.
+4. **All models** — the full list, sortable by newest / price / context, with
+   "free only", "open-weight only" and "max $/M tokens" filters.
+
+Shared exclusions for sections 1–3: ids containing `preview`, `beta`, `-exp`,
+`:extended`, `audio`, `image`, `embed`, `guard`, and models with
+`context_length < 32000` (section 2 relaxes the context limit to 8000).
+These exclusions never apply to search results or "All models".
+
+Each row shows name, provider, context length, input/output price per million
+tokens (or **FREE**), and badges: **🆕** (released within 30 days),
+**OPEN** (open-weight), **FREE**.
+
+Free models are rate-limited by OpenRouter; when a free model returns 429 the
+column says "free model rate-limited — retry or pick the paid variant" and
+offers the paid variant if one exists (same id without `:free`).
+
+### Persistence and defaults
+
+- Selection (ordered list of model ids), summary model, and fusion model
+  persist in settings. First-run defaults: first 3 Top picks; summary model =
+  cheapest Top pick; fusion model = first Top pick. If no API key credit is
+  wanted, a one-click "Try with free models" picks the top 3 Free models.
 
 ## 6. Sending and streaming
 
@@ -270,7 +309,8 @@ question(s) for this turn and each answer labelled with its model name.
 ## 12. Testing
 
 - `node --test tests/` covering pure core modules:
-  - `models.recommend` / filter / sort with fixture model lists
+  - `models.sections` (top picks, free, open-weight), `models.search`
+    (multi-word, token filters, ranking) / filter / sort with fixture lists
   - `conversation.buildMessages` for broadcast, targeted, clarify-batch,
     late-joining lanes, fork and continue-with-one
   - `clarify.detect` positive/negative cases (code blocks with `?`, rhetorical
