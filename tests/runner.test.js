@@ -152,3 +152,32 @@ test('isBusy reflects in-flight lanes', async () => {
   await p;
   assert.equal(runner.isBusy(conv.turns[0].id), false);
 });
+
+test('liveConversation returns the in-flight object, and null after', async () => {
+  let release;
+  const { runner, conv } = setup({ 'a/one': () => new Promise((r) => { release = () => r({ content: 'x' }); }), 'b/two': ok('y') });
+  const p = runner.send(conv, 'broadcast', C.broadcastInputs(conv, 'q'));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(runner.liveConversation(conv.id), conv);
+  assert.equal(runner.isBusy(null, conv.id), true);
+  release();
+  await p;
+  assert.equal(runner.liveConversation(conv.id), null);
+  assert.equal(runner.isBusy(null, conv.id), false);
+});
+
+test('stopConversation aborts only that conversation', async () => {
+  const hang = ({ signal }) => new Promise((resolve, reject) => signal.addEventListener('abort', () => reject(new realApi.ApiError('aborted', 'Stopped'))));
+  const s1 = setup({ 'a/one': hang, 'b/two': hang });
+  const conv2 = C.create(MODELS);
+  const p1 = s1.runner.send(s1.conv, 'broadcast', C.broadcastInputs(s1.conv, 'q'));
+  const p2 = s1.runner.send(conv2, 'broadcast', C.broadcastInputs(conv2, 'q'));
+  await new Promise((r) => setImmediate(r));
+  s1.runner.stopConversation(s1.conv.id);
+  const t1 = await p1;
+  assert.ok(Object.values(t1.responses).every((r) => r.status === 'stopped'));
+  assert.equal(s1.runner.isBusy(null, conv2.id), true);
+  s1.runner.stopAll();
+  await p2;
+});
+

@@ -120,6 +120,10 @@
         });
       f.turns.forEach((t, i) => { t.index = i; });
     }
+    // Fresh turn ids keep the fork independent of streams still running in the
+    // original; anything still streaming there is frozen as "stopped" here.
+    f.turns.forEach((t) => { t.id = MC.util.uid('t_'); });
+    recoverInterrupted(f);
     touch(f);
     return f;
   }

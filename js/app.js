@@ -4,16 +4,18 @@
   const { h, clear, toast, shortName, isTyping } = MC.dom;
 
   const state = { settings: null, store: null, models: [], modelsInfo: null, metas: [], conv: null, runner: null };
+  const deleted = new Set(); // ids deleted while a request for them may still be in flight
 
   function modelById(id) { return state.models.find((m) => m.id === id); }
   function cfg() { return state.settings.get(); }
 
   const refreshMetas = MC.util.throttle(async () => {
     state.metas = await state.store.list();
-    MC.ui.sidebar.render(state.metas, state.conv && state.conv.id);
+    MC.ui.sidebar.update(state.metas, state.conv && state.conv.id);
   }, 800);
 
   async function save(conv) {
+    if (deleted.has(conv.id)) return;
     try { await state.store.put(conv); } catch (e) { toast('Could not save: ' + e.message, 'error'); }
     refreshMetas();
   }
@@ -89,10 +91,14 @@
     const info = await MC.models.loadCached({ fetchModelsFn: () => MC.api.fetchModels(), force });
     state.models = info.models;
     state.modelsInfo = info;
+    if (info.source === 'fallback') {
+      toast('Could not load the model list — showing a small built-in list', 'warn');
+      // The tiny built-in list is no reason to drop the user's saved choices.
+      if (cfg().selected.length) return info;
+    }
     const r = MC.models.reconcileSelection(cfg(), state.models);
     state.settings.set(r.settings);
     if (r.dropped.length) toast('No longer available: ' + r.dropped.join(', '), 'warn');
-    if (info.source === 'fallback') toast('Could not load the model list — showing a small built-in list', 'warn');
     return info;
   }
 
@@ -104,14 +110,23 @@
     return state.conv;
   }
 
+  function blockedByBusy() {
+    if (!state.runner.isBusy()) return false;
+    toast('Wait for the current answers to finish (or Stop all)', 'warn');
+    return true;
+  }
+
   async function sendTurn(kind, inputs) {
+    if (blockedByBusy()) return null;
     const conv = state.conv;
     const turn = await state.runner.send(conv, kind, inputs);
+    if (deleted.has(conv.id)) return turn;
     autoDerive(conv, turn);
     return turn;
   }
 
   function sendBroadcast(text) {
+    if (blockedByBusy()) return;
     if (!cfg().selected.length && !state.conv) { toast('Pick at least one model first', 'warn'); openModelPicker(); return; }
     const conv = ensureConv();
     const inputs = MC.conv.broadcastInputs(conv, text);
@@ -132,9 +147,11 @@
   }
 
   async function openConversation(id) {
-    const conv = await state.store.get(id);
+    // A chat with answers still streaming must keep using the object the runner writes into.
+    const live = state.runner.liveConversation(id);
+    const conv = live || await state.store.get(id);
     if (!conv) { toast('Conversation not found', 'error'); return; }
-    if (MC.conv.recoverInterrupted(conv)) await state.store.put(conv);
+    if (!live && MC.conv.recoverInterrupted(conv)) await state.store.put(conv);
     state.conv = conv;
     document.body.classList.remove('side-open');
     refresh();
@@ -148,6 +165,8 @@
   }
 
   async function deleteConversation(id) {
+    deleted.add(id);
+    state.runner.stopConversation(id);
     await state.store.delete(id);
     if (state.conv && state.conv.id === id) state.conv = null;
     state.metas = await state.store.list();
@@ -193,7 +212,7 @@
       if ((k === 'k' || k === 'K') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); openModelPicker(); return; }
       if (k === '/' && !isTyping(document.activeElement) && !document.querySelector('dialog[open]')) { e.preventDefault(); openModelPicker(); return; }
       if (e.altKey && /^[1-9]$/.test(k) && state.conv) { e.preventDefault(); MC.ui.chat.focusLane(Number(k) - 1); }
-      if (k === 'Escape' && state.runner.isBusy() && !document.querySelector('dialog[open]')) state.runner.stopAll();
+      if (k === 'Escape' && state.runner.isBusy() && !isTyping(e.target) && !document.querySelector('dialog[open]')) state.runner.stopAll();
     });
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-copy]');

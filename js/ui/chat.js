@@ -101,7 +101,8 @@
     autoGrow(ta, 160);
     const send = () => {
       const text = ta.value.trim();
-      if (!text || app().state.runner.isBusy()) return;
+      if (!text) return;
+      if (app().state.runner.isBusy()) { MC.dom.toast('Wait for the current answers to finish (or Stop all)', 'warn'); return; }
       ta.value = '';
       app().sendTargeted(lane.id, text);
     };
@@ -199,9 +200,30 @@
   // ---------- public ----------
   function nearBottom(root) { return root.scrollHeight - root.scrollTop - root.clientHeight < 120; }
 
+  // Text typed into inline reply boxes, keyed by cell, survives full re-renders.
+  function saveDrafts(root) {
+    const drafts = {};
+    let focused = null;
+    root.querySelectorAll('.inline-reply').forEach((ta) => {
+      const key = ta.closest('[data-cell]').dataset.cell;
+      if (ta.value) drafts[key] = ta.value;
+      if (ta === document.activeElement) focused = key;
+    });
+    return { drafts, focused };
+  }
+
+  function restoreDrafts(root, { drafts, focused }) {
+    root.querySelectorAll('.inline-reply').forEach((ta) => {
+      const key = ta.closest('[data-cell]').dataset.cell;
+      if (drafts[key]) { ta.value = drafts[key]; ta.dispatchEvent(new Event('input')); }
+      if (key === focused) ta.focus();
+    });
+  }
+
   function render(conv) {
     const root = document.getElementById('chat');
     const stick = nearBottom(root);
+    const kept = saveDrafts(root);
     clear(root);
     view.pending.clear();
     if (!app().state.settings.getKey()) { firstRun(root); return; }
@@ -209,6 +231,7 @@
     const lanes = visibleLanes(conv);
     if (view.activeCol >= lanes.length) view.activeCol = 0;
     root.append(laneBar(conv, lanes), h('div', { class: 'turns' }, conv.turns.map((t) => turnEl(conv, t, lanes))));
+    restoreDrafts(root, kept);
     if (stick) root.scrollTop = root.scrollHeight;
   }
 

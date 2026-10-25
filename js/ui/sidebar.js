@@ -4,6 +4,7 @@
   'use strict';
   const { h, clear, toast, download } = MC.dom;
   let filter = '';
+  const state = { metas: [], currentId: null, fill: () => {} };
 
   function tree(metas) {
     const ids = new Set(metas.map((m) => m.id));
@@ -49,13 +50,18 @@
     clear(root);
     const search = h('input', { type: 'search', class: 'conv-search', placeholder: 'Search chats', value: filter, 'aria-label': 'Search chats' });
     const list = h('ul', { class: 'conv-list' });
+    state.metas = metas;
+    state.currentId = currentId;
     const fill = () => {
+      const metas = state.metas;
+      const currentId = state.currentId;
       clear(list);
       const q = filter.toLowerCase();
       const rows = q ? metas.filter((m) => (m.title || '').toLowerCase().includes(q)).map((m) => ({ m, depth: 0 })) : tree(metas);
       rows.forEach(({ m, depth }) => list.appendChild(item(m, depth, currentId)));
       if (!rows.length) list.appendChild(h('li', { class: 'muted small empty' }, q ? 'No matches' : 'No conversations yet'));
     };
+    state.fill = fill;
     search.addEventListener('input', () => { filter = search.value; fill(); });
     fill();
 
@@ -77,12 +83,25 @@
         search),
       list,
       h('div', { class: 'side-foot' },
-        h('button', { class: 'ghost small', disabled: !app.state.conv, onclick: () => download(`multaichat-${stamp()}.json`, MC.storage.exportJson([app.state.conv])) }, 'Export chat'),
+        h('button', { class: 'ghost small', dataset: { exportCurrent: '1' }, disabled: !app.state.conv, onclick: () => download(`multaichat-${stamp()}.json`, MC.storage.exportJson([app.state.conv])) }, 'Export chat'),
         h('button', { class: 'ghost small', onclick: async () => download(`multaichat-all-${stamp()}.json`, MC.storage.exportJson(await app.state.store.all())) }, 'Export all'),
         h('button', { class: 'ghost small', onclick: () => fileInput.click() }, 'Import'),
         fileInput));
   }
 
   MC.ui = MC.ui || {};
-  MC.ui.sidebar = { render };
+  // Background refresh: rebuild only the list, and leave it alone while a
+  // conversation is being renamed. The search box keeps its focus.
+  function update(metas, currentId) {
+    const root = document.getElementById('sidebar');
+    const list = root.querySelector('.conv-list');
+    if (!list || root.querySelector('.rename')) return;
+    state.metas = metas;
+    state.currentId = currentId;
+    state.fill();
+    const exp = root.querySelector('[data-export-current]');
+    if (exp) exp.disabled = !MC.app.state.conv;
+  }
+
+  MC.ui.sidebar = { render, update };
 })(window.MC);

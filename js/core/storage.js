@@ -21,6 +21,19 @@
     rememberKey: true,
   });
 
+  // Reading localStorage/indexedDB throws when the browser blocks site data.
+  function safeGlobal(name) {
+    try { return globalThis[name]; } catch (e) { return undefined; }
+  }
+
+  function memoryLs() {
+    const m = new Map();
+    return {
+      getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k),
+      key: (i) => [...m.keys()][i] || null, get length() { return m.size; },
+    };
+  }
+
   function normalizeKey(raw) {
     return String(raw || '').trim().replace(/^Bearer\s+/i, '').replace(/\s+/g, '');
   }
@@ -38,7 +51,7 @@
     try { ls && ls.setItem(key, JSON.stringify(value)); } catch (e) { /* quota or disabled */ }
   }
 
-  function createSettings(ls = globalThis.localStorage) {
+  function createSettings(ls = safeGlobal('localStorage') || memoryLs()) {
     let memKey = null;
     return {
       get() {
@@ -81,14 +94,15 @@
 
   function byUpdatedDesc(a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }
 
-  function localStore(ls) {
+  function localStore(ls, kind = 'local') {
     const read = () => readJson(ls, K_CONVS, {}) || {};
+    const write = (all) => ls.setItem(K_CONVS, JSON.stringify(all)); // throws on quota so callers can report it
     return {
-      kind: 'local',
+      kind,
       async list() { return Object.values(read()).map(meta).sort(byUpdatedDesc); },
       async get(id) { return read()[id]; },
-      async put(conv) { const all = read(); all[conv.id] = conv; writeJson(ls, K_CONVS, all); },
-      async delete(id) { const all = read(); delete all[id]; writeJson(ls, K_CONVS, all); },
+      async put(conv) { const all = read(); all[conv.id] = conv; write(all); },
+      async delete(id) { const all = read(); delete all[id]; write(all); },
       async all() { return Object.values(read()); },
     };
   }
@@ -129,11 +143,11 @@
     });
   }
 
-  async function openStore({ idb = globalThis.indexedDB, ls = globalThis.localStorage } = {}) {
+  async function openStore({ idb = safeGlobal('indexedDB'), ls = safeGlobal('localStorage') } = {}) {
     if (idb) {
       try { return idbStore(await openIdb(idb)); } catch (e) { /* fall through */ }
     }
-    return localStore(ls);
+    return ls ? localStore(ls) : localStore(memoryLs(), 'memory');
   }
 
   function exportJson(convs) {

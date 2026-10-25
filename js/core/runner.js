@@ -11,10 +11,34 @@
   const NO_KEY = 'Add your OpenRouter API key in Settings';
 
   function createRunner({ api = MC.api, getKey, save, onChange = () => {}, saveThrottleMs = 1000 }) {
-    const controllers = new Map(); // `${turnId}:${laneId}` -> AbortController
-    const ctrlKey = (turnId, laneId) => turnId + ':' + laneId;
+    // Every in-flight request: token -> { ctrl, convId, turnId }
+    const inflight = new Map();
+    // Conversations with requests in flight: id -> { conv, count }
+    const live = new Map();
+    // One throttled saver per conversation so chats don't cancel each other's saves.
+    const savers = new Map();
 
-    const throttledSave = MC.util.throttle((conv) => { save(conv); }, saveThrottleMs);
+    function begin(conv, turnId) {
+      const token = {};
+      const ctrl = new AbortController();
+      inflight.set(token, { ctrl, convId: conv.id, turnId });
+      const l = live.get(conv.id) || { conv, count: 0 };
+      l.count++;
+      live.set(conv.id, l);
+      return { token, ctrl };
+    }
+
+    function end(conv, token) {
+      inflight.delete(token);
+      const l = live.get(conv.id);
+      if (l && --l.count <= 0) live.delete(conv.id);
+    }
+
+    function throttledSave(conv) {
+      let s = savers.get(conv.id);
+      if (!s) { s = MC.util.throttle((c) => { save(c); }, saveThrottleMs); savers.set(conv.id, s); }
+      s(conv);
+    }
 
     function errText(err, modelId) {
       return MC.api.errorMessage(err, modelId);
@@ -23,14 +47,14 @@
     async function streamLane(conv, turn, laneId) {
       const lane = MC.conv.laneById(conv, laneId);
       const r = turn.responses[laneId];
+      if (!lane || !r) return;
       const key = getKey();
       if (!key) {
         Object.assign(r, { status: 'error', error: NO_KEY });
         onChange(conv, { turnId: turn.id, laneId });
         return;
       }
-      const ctrl = new AbortController();
-      controllers.set(ctrlKey(turn.id, laneId), ctrl);
+      const { token, ctrl } = begin(conv, turn.id + ':' + laneId);
       try {
         const res = await api.streamChat({
           key,
@@ -54,7 +78,7 @@
         if (err && err.status === 'aborted') r.status = 'stopped';
         else { r.status = 'error'; r.error = errText(err, lane.modelId); r.errorStatus = err && err.status; }
       } finally {
-        controllers.delete(ctrlKey(turn.id, laneId));
+        end(conv, token);
         MC.conv.touch(conv);
         onChange(conv, { turnId: turn.id, laneId });
       }
@@ -78,17 +102,32 @@
       return turn;
     }
 
+    // stop(turnId) stops a whole turn (answers, TL;DR, Fusion); stop(turnId, laneId) one answer.
     function stop(turnId, laneId) {
-      for (const [k, c] of controllers) {
-        if (k === ctrlKey(turnId, laneId) || (!laneId && k.startsWith(turnId + ':'))) c.abort();
+      for (const f of inflight.values()) {
+        if (laneId ? f.turnId === turnId + ':' + laneId : f.turnId.split(':')[0] === turnId) f.ctrl.abort();
       }
     }
 
-    function stopAll() { for (const c of controllers.values()) c.abort(); }
+    function stopConversation(convId) {
+      for (const f of inflight.values()) if (f.convId === convId) f.ctrl.abort();
+    }
 
-    function isBusy(turnId) {
-      for (const k of controllers.keys()) if (!turnId || k.startsWith(turnId + ':')) return true;
+    function stopAll() { for (const f of inflight.values()) f.ctrl.abort(); }
+
+    // isBusy() — anything running; isBusy(turnId) — that turn; isBusy(null, convId) — that conversation.
+    function isBusy(turnId, convId) {
+      for (const f of inflight.values()) {
+        if (convId && f.convId !== convId) continue;
+        if (turnId && f.turnId.split(':')[0] !== turnId) continue;
+        return true;
+      }
       return false;
+    }
+
+    function liveConversation(convId) {
+      const l = live.get(convId);
+      return l ? l.conv : null;
     }
 
     async function runTldr(conv, turnId, modelId) {
@@ -96,8 +135,7 @@
       const d = (turn.tldr = { modelId, status: 'streaming', content: '', createdAt: Date.now() });
       onChange(conv, { turnId, derived: 'tldr' });
       const key = getKey();
-      const ctrl = new AbortController();
-      controllers.set(ctrlKey(turnId, 'tldr'), ctrl);
+      const { token, ctrl } = begin(conv, turnId + ':tldr');
       try {
         if (!key) throw Object.assign(new Error(NO_KEY), { noKey: true });
         const res = await api.streamChat({
@@ -110,7 +148,7 @@
         d.status = 'error';
         d.error = err.noKey ? NO_KEY : errText(err, modelId);
       } finally {
-        controllers.delete(ctrlKey(turnId, 'tldr'));
+        end(conv, token);
         MC.conv.touch(conv);
         onChange(conv, { turnId, derived: 'tldr' });
         await save(conv);
@@ -123,8 +161,7 @@
       turn.fusion = { modelId, status: 'streaming', createdAt: Date.now() };
       onChange(conv, { turnId, derived: 'fusion' });
       const key = getKey();
-      const ctrl = new AbortController();
-      controllers.set(ctrlKey(turnId, 'fusion'), ctrl);
+      const { token, ctrl } = begin(conv, turnId + ':fusion');
       try {
         if (!key) throw Object.assign(new Error(NO_KEY), { noKey: true });
         const res = await api.complete({
@@ -138,7 +175,7 @@
       } catch (err) {
         turn.fusion = { modelId, status: 'error', error: err.noKey ? NO_KEY : errText(err, modelId), createdAt: Date.now() };
       } finally {
-        controllers.delete(ctrlKey(turnId, 'fusion'));
+        end(conv, token);
         MC.conv.touch(conv);
         onChange(conv, { turnId, derived: 'fusion' });
         await save(conv);
@@ -146,7 +183,7 @@
       return turn.fusion;
     }
 
-    return { send, retry, stop, stopAll, isBusy, runTldr, runFusion };
+    return { send, retry, stop, stopConversation, stopAll, isBusy, liveConversation, runTldr, runFusion };
   }
 
   return { createRunner, NO_KEY };

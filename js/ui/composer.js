@@ -82,7 +82,9 @@
     boxes[0].ta.addEventListener('input', mirror);
     same.addEventListener('change', () => { boxes.slice(1).forEach((b) => { b.ta.disabled = same.checked; }); mirror(); });
 
+    let sent = false;
     const send = () => {
+      if (sent) return;
       mirror();
       const inputs = {};
       for (const b of boxes) if (b.ta.value.trim()) inputs[b.lane.id] = b.ta.value.trim();
@@ -91,19 +93,23 @@
         const text = "Answers to other models' questions:\n" + boxes.filter((b) => inputs[b.lane.id]).map((b) => `${shortName(b.lane.modelName)}: ${inputs[b.lane.id]}`).join('\n');
         others.forEach((l) => { inputs[l.id] = text; });
       }
+      sent = true;
       closeDialog(dlg);
       app().sendBatch(inputs);
       update();
     };
 
-    dlg.append(h('form', { class: 'dialog-body', onsubmit: (e) => { e.preventDefault(); send(); } },
+    dlg.append(h('form', {
+      class: 'dialog-body',
+      onsubmit: (e) => { e.preventDefault(); send(); },
+      onkeydown: (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } },
+    },
       h('header', { class: 'dialog-head' }, h('h2', {}, 'Answer clarifying questions'), h('button', { type: 'button', class: 'icon', 'aria-label': 'Close', onclick: () => closeDialog(dlg) }, '✕')),
       boxes.map((b) => h('div', { class: 'batch-item' },
         h('div', { class: 'batch-q' }, h('strong', {}, shortName(b.lane.modelName) + ': '), `“${b.question}”`), b.ta)),
       h('label', { class: 'check' }, same, ' Same answer for all'),
       others.length ? h('label', { class: 'check' }, alsoOthers, ` Also send to models that didn't ask (${others.map((l) => shortName(l.modelName)).join(', ')})`) : null,
       h('footer', { class: 'dialog-foot' }, h('span', { class: 'muted small' }, 'Ctrl/⌘+Enter to send'), h('button', { type: 'submit', class: 'primary' }, 'Send'))));
-    dlg.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
     openDialog(dlg);
     boxes[0].ta.focus();
   }
@@ -116,7 +122,11 @@
     view.fit = autoGrow(view.ta, 240);
     view.ta.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); }
-      if (e.key === 'Escape' && view.target) setTarget(null);
+      if (e.key === 'Escape') {
+        // First Esc clears the "one model" target; with no target it stops all answers.
+        if (view.target) setTarget(null);
+        else if (busy()) app().state.runner.stopAll();
+      }
     });
     view.send = h('button', { class: 'primary', onclick: submit, 'aria-label': 'Send' }, 'Send');
     view.stop = h('button', { class: 'danger', hidden: true, onclick: () => app().state.runner.stopAll() }, '■ Stop all');

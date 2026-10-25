@@ -165,3 +165,15 @@ test('laneById finds a lane', () => {
   const { conv, A } = twoLaneConv();
   assert.equal(C.laneById(conv, A).modelId, 'a/one');
 });
+
+test('fork of a streaming turn gets new turn ids and no streaming responses', () => {
+  const { conv, A, B } = twoLaneConv();
+  const t0 = C.addTurn(conv, 'broadcast', C.broadcastInputs(conv, 'q'));
+  t0.responses[A].content = 'partial';
+  finish(t0, B, 'done');
+  const f = C.fork(conv, 0);
+  assert.notEqual(f.turns[0].id, t0.id);
+  assert.equal(f.turns[0].responses[A].status, 'stopped');
+  assert.equal(f.turns[0].responses[A].content, 'partial');
+  assert.equal(t0.responses[A].status, 'streaming', 'original untouched');
+});

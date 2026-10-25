@@ -46,7 +46,7 @@ Plain HTML/CSS/JavaScript with no build step and no dependencies. It runs entire
 | `/` or `Ctrl/⌘+K` | Open the model picker |
 | `↑` `↓` `Enter` | Move and select in the picker |
 | `Alt+1…9` | Reply to model N (focuses its question box, or targets the composer) |
-| `Esc` | Clear the "to one model" target; stop all answers while streaming |
+| `Esc` | In the message box: clear the "to one model" target, or stop all answers while streaming |
 | `Ctrl/⌘+Enter` | Send in the "Answer them together" panel |
 
 ## Notes
@@ -58,7 +58,7 @@ Plain HTML/CSS/JavaScript with no build step and no dependencies. It runs entire
 
 ```
 npm test         # unit tests for js/core and the markdown renderer (Node 22+, no deps)
-npm run smoke    # Playwright browser test against a mocked OpenRouter, file:// and http://
+npm run smoke    # Playwright browser tests (flow + regressions) against a mocked OpenRouter
 ```
 
 Code layout: `js/core/*` holds the logic and has no page-handling code, so it is unit-tested in Node. `js/ui/*` builds the page. `js/app.js` connects the two. Scripts are loaded as plain `<script>` tags rather than ES modules, so the app also works when opened from disk.

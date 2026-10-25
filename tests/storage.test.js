@@ -96,3 +96,32 @@ test('importJson rejects wrong shape', () => {
   assert.throws(() => storage.importJson('{"foo":1}', []), /Not a Multaichat export/);
   assert.throws(() => storage.importJson('nope', []), /Not a Multaichat export/);
 });
+
+test('local store put surfaces quota errors', async () => {
+  const ls = memoryStorage();
+  const store = await storage.openStore({ idb: undefined, ls });
+  ls.setItem = () => { throw new Error('QuotaExceededError'); };
+  await assert.rejects(store.put({ id: 'a', updatedAt: 1, lanes: [], turns: [] }), /Quota/);
+});
+
+test('blocked storage getters do not crash', async () => {
+  const desc = (k) => Object.getOwnPropertyDescriptor(globalThis, k);
+  const saved = { ls: desc('localStorage'), idb: desc('indexedDB') };
+  const boom = { configurable: true, get() { throw new Error('SecurityError'); } };
+  Object.defineProperty(globalThis, 'localStorage', boom);
+  Object.defineProperty(globalThis, 'indexedDB', boom);
+  try {
+    const s = storage.createSettings();
+    assert.deepEqual(s.get(), storage.DEFAULT_SETTINGS);
+    s.setKey('k', true);
+    assert.equal(s.getKey(), 'k');
+    const store = await storage.openStore();
+    assert.equal(store.kind, 'memory');
+    await store.put({ id: 'a', title: 'A', updatedAt: 1, lanes: [], turns: [] });
+    assert.equal((await store.list()).length, 1);
+  } finally {
+    for (const [k, d] of [['localStorage', saved.ls], ['indexedDB', saved.idb]]) {
+      if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k];
+    }
+  }
+});
