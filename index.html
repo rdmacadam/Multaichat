@@ -2,17 +2,42 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
   <title>Multaichat</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='6' width='8' height='20' rx='2' fill='%236366f1'/%3E%3Crect x='12' y='6' width='8' height='20' rx='2' fill='%2310b981'/%3E%3Crect x='22' y='6' width='8' height='20' rx='2' fill='%23f59e0b'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header id="topbar"></header>
   <div id="layout">
-    <aside id="sidebar"></aside>
-    <main id="chat"></main>
+    <aside id="sidebar" aria-label="Conversations"></aside>
+    <div id="scrim" onclick="document.body.classList.remove('side-open')"></div>
+    <main id="chat" aria-live="off"></main>
   </div>
   <footer id="composer"></footer>
+
+  <dialog id="settings-dialog" aria-label="Settings"></dialog>
+  <dialog id="picker-dialog" aria-label="Choose models"></dialog>
+  <dialog id="batch-dialog" aria-label="Answer clarifying questions"></dialog>
+
+  <!-- Classic scripts (no modules) so the app also works when opened from disk. -->
   <script src="js/core/util.js"></script>
+  <script src="js/core/storage.js"></script>
+  <script src="js/core/openrouter.js"></script>
+  <script src="js/core/models.js"></script>
+  <script src="js/core/conversation.js"></script>
+  <script src="js/core/clarify.js"></script>
+  <script src="js/core/fusion.js"></script>
+  <script src="js/core/runner.js"></script>
+  <script src="js/ui/markdown.js"></script>
+  <script src="js/ui/dom.js"></script>
+  <script src="js/ui/settings.js"></script>
+  <script src="js/ui/sidebar.js"></script>
+  <script src="js/ui/picker.js"></script>
+  <script src="js/ui/chat.js"></script>
+  <script src="js/ui/composer.js"></script>
+  <script src="js/ui/derived.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
