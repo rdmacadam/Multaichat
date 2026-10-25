@@ -197,8 +197,9 @@ inline reply box and Answer-together panel work the same.
 ## 8. TL;DR and Fusion
 
 Both run per turn via buttons under the turn ("TL;DR", "Fusion"), with optional
-"auto-run after all answers finish" toggles in settings. Both use the
-non-streaming `MC.api.complete()` (Fusion) or streaming (TL;DR), and save into
+"auto-run after all answers finish" toggles in settings. TL;DR streams via
+`MC.api.streamChat()`; Fusion uses non-streaming `MC.api.complete()` (it must
+be parsed as a whole). Results are saved into
 `turn.tldr` / `turn.fusion`. Regenerate replaces. Only `done`/`stopped`
 responses are used; TL;DR needs ≥1, Fusion needs ≥2.
 
