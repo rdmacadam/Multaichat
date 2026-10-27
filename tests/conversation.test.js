@@ -316,3 +316,64 @@ test('text-only lanes still receive PDFs, just not images', () => {
   ]);
   assert.deepEqual(C.attachmentIdsFor(conv, B, 0), ['p1']);
 });
+
+test('addTurn stores route', () => {
+  const { conv, A } = twoLaneConv();
+  const route = { mode: 'auto', picks: [{ modelId: 'a/one', p: 0.6 }] };
+  const t = C.addTurn(conv, 'broadcast', { [A]: 'hi' }, { route });
+  assert.deepEqual(t.route, route);
+  assert.notEqual(t.route, route);
+  assert.notEqual(t.route.picks, route.picks);
+  assert.equal('route' in C.addTurn(conv, 'broadcast', { [A]: 'x' }), false);
+});
+
+test('ensureLanes reactivates and never duplicates', () => {
+  const c = C.create([{ id: 'a/one', name: 'One' }, { id: 'b/two', name: 'Two' }]);
+  C.removeLane(c, c.lanes[1].id);
+  const ids = C.ensureLanes(c, [{ id: 'b/two', name: 'Two' }, { id: 'c/three', name: 'Three' }, { id: 'a/one', name: 'One' }]);
+  assert.equal(c.lanes.length, 3);
+  assert.equal(c.lanes[1].active, true);
+  assert.deepEqual(ids, [c.lanes[1].id, c.lanes[2].id, c.lanes[0].id]);
+  assert.equal(c.lanes[2].modelId, 'c/three');
+});
+
+test('ensureLanes late joiner gets seed context', () => {
+  const { conv, A } = twoLaneConv();
+  C.addTurn(conv, 'broadcast', { [A]: 'first question' });
+  const [id] = C.ensureLanes(conv, [{ id: 'c/three', name: 'Three' }]);
+  const lane = C.laneById(conv, id);
+  assert.equal(lane.joinedAtTurn, 1);
+  assert.match(lane.seedContext, /first question/);
+});
+
+test('isRouted needs a route and the lane in inputs', () => {
+  const { conv, A, B } = twoLaneConv();
+  const routed = C.addTurn(conv, 'broadcast', { [A]: 'hi' }, { route: { mode: 'auto', picks: [] } });
+  const plain = C.addTurn(conv, 'broadcast', { [A]: 'hi', [B]: 'hi' });
+  assert.equal(C.isRouted(routed, A), true);
+  assert.equal(C.isRouted(routed, B), false);
+  assert.equal(C.isRouted(plain, A), false);
+});
+
+test('fork keeps route and judge on copied turns', () => {
+  const { conv, A } = twoLaneConv();
+  const t = C.addTurn(conv, 'broadcast', { [A]: 'hi' });
+  finish(t, A, 'ok');
+  t.route = { mode: 'auto', picks: [{ modelId: 'a/one', p: 1 }] };
+  t.judge = { status: 'done', winner: A };
+  const f = C.fork(conv, 0);
+  assert.deepEqual(f.turns[0].route, t.route);
+  assert.deepEqual(f.turns[0].judge, t.judge);
+  assert.notEqual(f.turns[0].route, t.route);
+  assert.notEqual(f.turns[0].judge, t.judge);
+});
+
+test('recoverInterrupted marks a streaming judge as interrupted', () => {
+  const { conv, A } = twoLaneConv();
+  const t = C.addTurn(conv, 'broadcast', { [A]: 'hi' });
+  finish(t, A, 'ok');
+  t.judge = { status: 'streaming' };
+  assert.equal(C.recoverInterrupted(conv), true);
+  assert.equal(t.judge.status, 'error');
+  assert.equal(t.judge.error, 'Interrupted');
+});

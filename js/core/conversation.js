@@ -33,12 +33,13 @@
     return { status: 'streaming', content: '', previous: [], asksQuestion: false };
   }
 
-  // extra: { attachments: AttachmentRef[], delivery: {laneId: 'full'|'text'}, skipped: {laneId: reason} }
+  // extra: { attachments: AttachmentRef[], delivery: {laneId: 'full'|'text'}, skipped: {laneId: reason}, route: Route }
   function addTurn(conv, kind, inputs, extra = {}) {
     const turn = { id: MC.util.uid('t_'), index: conv.turns.length, createdAt: Date.now(), kind, inputs: Object.assign({}, inputs), responses: {} };
     if (extra.attachments && extra.attachments.length) turn.attachments = extra.attachments.slice();
     if (extra.delivery && Object.keys(extra.delivery).length) turn.delivery = Object.assign({}, extra.delivery);
     if (extra.skipped && Object.keys(extra.skipped).length) turn.skipped = Object.assign({}, extra.skipped);
+    if (extra.route) turn.route = clone(extra.route);
     for (const laneId of Object.keys(inputs)) turn.responses[laneId] = emptyResponse();
     conv.turns.push(turn);
     if (conv.title === NEW_TITLE) {
@@ -143,6 +144,23 @@
     return lane;
   }
 
+  // Lane ids for `models` ({id, name}), in order: reuse an active lane, wake an
+  // inactive one, else add a late-joining lane. Never duplicates a model.
+  function ensureLanes(conv, models) {
+    return models.map((m) => {
+      const same = conv.lanes.filter((l) => l.modelId === m.id);
+      const lane = same.find((l) => l.active) || same[0];
+      if (lane) {
+        if (!lane.active) { lane.active = true; touch(conv); }
+        return lane.id;
+      }
+      return addLane(conv, m).id;
+    });
+  }
+
+  // True when the turn was routed and `laneId` was one of the picked lanes.
+  function isRouted(turn, laneId) { return !!turn.route && laneId in turn.inputs; }
+
   function removeLane(conv, laneId) {
     const l = laneById(conv, laneId);
     if (l) { l.active = false; touch(conv); }
@@ -190,7 +208,7 @@
       for (const r of Object.values(t.responses)) {
         if (r.status === 'streaming') { r.status = 'stopped'; changed = true; }
       }
-      for (const k of ['tldr', 'fusion']) {
+      for (const k of ['tldr', 'fusion', 'judge']) {
         if (t[k] && t[k].status === 'streaming') { t[k].status = 'error'; t[k].error = 'Interrupted'; changed = true; }
       }
     }
@@ -201,5 +219,5 @@
     return Object.keys(turn.responses).filter((id) => hasAnswer(turn.responses[id]));
   }
 
-  return { NEW_TITLE, setSystemPrompt, promptAt, attachmentIdsFor, create, addTurn, broadcastInputs, laneById, turnById, buildMessages, addLane, removeLane, beginRetry, fork, recoverInterrupted, answeredLanes, touch };
+  return { NEW_TITLE, setSystemPrompt, promptAt, attachmentIdsFor, create, addTurn, broadcastInputs, laneById, turnById, buildMessages, addLane, ensureLanes, isRouted, removeLane, beginRetry, fork, recoverInterrupted, answeredLanes, touch };
 });
