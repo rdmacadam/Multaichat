@@ -258,3 +258,50 @@ dialog::backdrop { background: rgba(0,0,0,.35); }
 .tip[hidden] { display: none; }
 .cost-wrap { display: inline-flex; align-items: center; flex: none; }
 #cost { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- router ---------- */
+.router-btn { white-space: nowrap; flex: none; }
+.composer-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.composer-chips:not(:has(> :not([hidden]))) { display: none; }
+.router-chip { display: flex; align-items: center; gap: 2px; background: var(--accent-soft); color: var(--accent); border-radius: 99px; padding: 1px 4px 1px 2px; font-size: 13px; font-weight: 600; }
+.router-chip-open { background: none; border: 0; padding: 0 4px 0 8px; color: inherit; font-weight: inherit; white-space: nowrap; }
+#router-dialog { width: min(680px, calc(100vw - 24px)); }
+.router-panel { overflow: hidden; }
+.router-scroll { overflow-y: auto; min-height: 0; display: grid; gap: 12px; padding-right: 2px; }
+.router-panel.router-off .router-scroll > :not(.router-switch) { opacity: .6; }
+.router-switch { display: flex; align-items: center; }
+.router-switch input { width: 18px; height: 18px; }
+.router-label { display: inline-flex; align-items: center; }
+.mode-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.mode-card { display: flex; align-items: flex-start; gap: 4px; border: 1px solid var(--border); border-radius: 10px; padding: 8px; min-width: 0; }
+.mode-card.selected { border-color: var(--accent); background: var(--accent-soft); }
+.mode-pick { display: flex; gap: 8px; align-items: flex-start; flex: 1; cursor: pointer; min-width: 0; }
+.mode-pick input { margin-top: 4px; }
+.mode-text { display: grid; min-width: 0; }
+.mode-card .info-wrap { margin-top: 2px; }
+.router-count { width: 64px; text-align: center; }
+.decider-picker { display: grid; gap: 8px; min-width: 0; }
+.decider-filters { gap: 6px 14px; font-size: 13px; }
+.decider-list { display: grid; gap: 2px; max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
+.decider-list h3 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 6px 6px 2px; }
+.decider-row { display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 8px; cursor: pointer; min-width: 0; }
+.decider-row:hover { background: var(--panel-2); }
+.decider-row.selected { background: var(--accent-soft); }
+.decider-row.unavailable { opacity: .5; cursor: default; }
+.decider-row.unavailable:hover { background: transparent; }
+.decider-row .star { color: var(--warn); font-size: 16px; padding: 2px 4px; flex: none; }
+.decider-main { flex: 1; display: grid; min-width: 0; }
+.decider-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.decider-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.decider-meta { display: flex; gap: 6px; align-items: center; font-size: 12.5px; flex: none; }
+@media (max-width: 800px) {
+  .mode-cards { grid-template-columns: 1fr; }
+  .decider-row { flex-wrap: wrap; }
+  .decider-meta { margin-left: 30px; }
+}
+.row > .router-count { flex: none; }
+@media (max-width: 800px) {
+  /* the toolbar scrolls sideways rather than clipping ⚙ on a phone */
+  #topbar { gap: 6px; padding: 8px; overflow-x: auto; scrollbar-width: none; }
+  #topbar > button.ghost { padding: 5px 8px; flex: none; }
+}

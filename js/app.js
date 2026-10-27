@@ -3,7 +3,7 @@
   'use strict';
   const { h, clear, toast, shortName, isTyping } = MC.dom;
 
-  const state = { settings: null, store: null, models: [], modelsInfo: null, metas: [], conv: null, runner: null, presets: null,
+  const state = { settings: null, store: null, models: [], modelsInfo: null, deciders: [], metas: [], conv: null, runner: null, presets: null,
     draft: {} }; // draft: system prompt chosen before the chat's first message
   const deleted = new Set(); // ids deleted while a request for them may still be in flight
 
@@ -79,6 +79,7 @@
         quick),
       h('button', { class: 'ghost', title: 'Choose models (/)', onclick: () => openModelPicker() }, 'Models'),
       h('button', { class: 'ghost', title: 'Presets: system prompt, template and models', onclick: () => MC.ui.presets.open() }, 'Presets'),
+      h('button', { class: 'ghost router-btn', title: 'Router: let a decision model pick which models answer', onclick: () => MC.ui.router.open() }, MC.ui.router.label(cfg())),
       h('span', { class: 'cost-wrap' }, h('button', { class: 'ghost', id: 'cost', 'aria-label': 'Chat cost' }, 'Σ $0.00'), MC.dom.info(COST_INFO)),
       h('button', { class: 'icon', 'aria-label': 'Settings', title: 'Settings', onclick: () => MC.ui.settings.open() }, '⚙'));
   }
@@ -122,8 +123,19 @@
 
   function removeModel(id) { setSelection(currentModelIds().filter((x) => x !== id)); }
 
+  async function refreshDeciders(force) {
+    const r = await MC.models.loadDeciders({ fetchDecidersFn: () => MC.api.fetchDeciders(), force });
+    state.deciders = r.deciders;
+    MC.ui.router.update();
+    return r;
+  }
+
+  // Loads the chat models and, alongside, the decision models.
   async function refreshModels(force) {
-    const info = await MC.models.loadCached({ fetchModelsFn: () => MC.api.fetchModels(), force });
+    const [info] = await Promise.all([
+      MC.models.loadCached({ fetchModelsFn: () => MC.api.fetchModels(), force }),
+      refreshDeciders(force),
+    ]);
     state.models = info.models;
     state.modelsInfo = info;
     if (info.source === 'fallback') {
@@ -361,7 +373,7 @@
   }
 
   MC.app = {
-    state, start, refresh, modelById, refreshModels, openModelPicker, setSelection, addModel, removeModel,
+    state, start, refresh, modelById, refreshModels, refreshDeciders, openModelPicker, setSelection, addModel, removeModel,
     sendBroadcast, sendTargeted, sendBatch, openConversation, newChat, deleteConversation, renameConversation,
     importConversations, forkAt, save, ensureConv, applyPreset, setChatSystemPrompt, promptHolder, sendWithAttachments, updateCost,
   };

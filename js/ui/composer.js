@@ -5,7 +5,7 @@
   const { h, clear, shortName, openDialog, closeDialog, autoGrow, toast } = MC.dom;
   const app = () => MC.app;
 
-  const view = { target: null, ta: null, chip: null, send: null, stop: null, banner: null, fit: null, files: [], tray: null };
+  const view = { target: null, ta: null, chip: null, routerChip: null, routerKey: null, send: null, stop: null, banner: null, fit: null, files: [], tray: null };
 
   function lane(id) { const c = app().state.conv; return c && MC.conv.laneById(c, id); }
 
@@ -19,11 +19,42 @@
   function renderChip() {
     clear(view.chip);
     const l = view.target && lane(view.target);
-    if (!l) { view.chip.hidden = true; view.ta.placeholder = 'Ask all models…  (Enter to send, Shift+Enter for a new line)'; return; }
+    if (!l) { view.chip.hidden = true; view.ta.placeholder = defaultPlaceholder(); return; }
     view.chip.hidden = false;
     view.chip.append(h('span', {}, `↳ to ${shortName(l.modelName)} only`),
       h('button', { class: 'chip-x', 'aria-label': 'Send to all models instead', onclick: () => setTarget(null) }, '✕'));
     view.ta.placeholder = `Message ${shortName(l.modelName)} only…`;
+  }
+
+  function routerOn() { return MC.router.withDefaults(app().state.settings.get().router).enabled; }
+
+  function defaultPlaceholder() {
+    return routerOn() ? MC.ui.router.placeholder(app().state.settings.get()) : 'Ask all models…  (Enter to send, Shift+Enter for a new line)';
+  }
+
+  // 🧭 chip while the router is on; its ✕ turns the router off.
+  function renderRouterChip() {
+    const settings = app().state.settings.get();
+    const on = routerOn();
+    const label = MC.ui.router.label(settings);
+    const key = on ? label + '|' + defaultPlaceholder() : '';
+    if (key === view.routerKey) return;
+    view.routerKey = key;
+    clear(view.routerChip);
+    view.routerChip.hidden = !on;
+    if (on) {
+      view.routerChip.append(
+        h('button', { class: 'router-chip-open', title: 'Router settings', onclick: () => MC.ui.router.open() }, label),
+        h('button', { class: 'chip-x', 'aria-label': 'Turn the router off', onclick: turnRouterOff }, '✕'));
+    }
+    if (!view.target) view.ta.placeholder = defaultPlaceholder();
+  }
+
+  function turnRouterOff() {
+    const r = MC.router.withDefaults(app().state.settings.get().router);
+    app().state.settings.set({ router: MC.router.withDefaults(Object.assign(r, { enabled: false })) });
+    app().refresh();
+    focus();
   }
 
   function busy() { return app().state.runner && app().state.runner.isBusy(); }
@@ -129,6 +160,7 @@
     view.send.hidden = b;
     view.stop.hidden = !b;
     if (view.target && !(lane(view.target) || {}).active) { view.target = null; renderChip(); }
+    renderRouterChip();
     const asking = b ? [] : askingLanes();
     clear(view.banner);
     view.banner.hidden = asking.length < 2;
@@ -191,6 +223,7 @@
     const root = clear(document.getElementById('composer'));
     view.banner = h('div', { class: 'ask-banner', hidden: true, role: 'status' });
     view.chip = h('div', { class: 'target-chip', hidden: true });
+    view.routerChip = h('div', { class: 'router-chip', hidden: true });
     view.ta = h('textarea', { id: 'prompt', rows: 1, 'aria-label': 'Message' });
     view.fit = autoGrow(view.ta, 240);
     view.ta.addEventListener('keydown', (e) => {
@@ -216,7 +249,7 @@
       if (files.length) { e.preventDefault(); addFiles(files); }
     });
     root.append(view.banner, h('div', { class: 'composer-row' }, clip, input,
-      h('div', { class: 'composer-input' }, view.chip, view.tray, view.ta), view.send, view.stop));
+      h('div', { class: 'composer-input' }, h('div', { class: 'composer-chips' }, view.chip, view.routerChip), view.tray, view.ta), view.send, view.stop));
     renderChip();
   }
 
