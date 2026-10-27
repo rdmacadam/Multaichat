@@ -199,3 +199,52 @@ test('activeFilterCount', () => {
   assert.equal(M.activeFilterCount({ maxIn: 1, images: true, files: false, minContext: '' }), 2);
   assert.equal(M.activeFilterCount(undefined), 0);
 });
+
+test('normalize flags router models by negative price and keeps a short desc', () => {
+  const [m] = M.normalize([{ id: 'openrouter/auto', name: 'Auto Router', pricing: { prompt: '-1', completion: '-1' }, description: 'Picks a model. More text here.' }]);
+  assert.equal(m.router, true); assert.equal(m.desc, 'Picks a model.');
+});
+
+test('normalize desc: no description, no period, and 160-char cut', () => {
+  const [a, b, c, d] = M.normalize([
+    { id: 'a/a', pricing: { prompt: '0.000001' } },
+    { id: 'a/b', pricing: { prompt: '0.000001' }, description: '  No terminator here  ' },
+    { id: 'a/c', pricing: { prompt: '0.000001' }, description: 'x'.repeat(300) + '. Next.' },
+    { id: 'a/d', pricing: { prompt: '0.000001' }, description: 'Version 1.5 is great! Really.' }]);
+  assert.equal(a.desc, ''); assert.equal(a.router, false);
+  assert.equal(b.desc, 'No terminator here');
+  assert.equal(c.desc.length, 160);
+  assert.equal(d.desc, 'Version 1.5 is great!');
+});
+
+test('normalizeDeciders keeps decision models with inputs and free flag', () => {
+  const d = M.normalizeDeciders([
+    { id: 'baseten/mammoth-1:free', name: 'Baseten: Mammoth', context_length: 16384, pricing: { prompt: '0' }, architecture: { input_modalities: ['text'], output_modalities: ['decisions'] } },
+    { id: 'liquid/d1-ultra', name: 'LiquidAI: d1-ultra', context_length: 32768, pricing: { prompt: '0.000000042' }, architecture: { input_modalities: ['text', 'image'], output_modalities: ['decisions'] } },
+    { id: 'openai/gpt-6', architecture: { output_modalities: ['text'] } }]);
+  assert.deepEqual(d.map((x) => [x.id, x.free, x.images, x.context]), [['baseten/mammoth-1:free', true, false, 16384], ['liquid/d1-ultra', false, true, 32768]]);
+  assert.equal(d[1].priceIn, 0.042);
+});
+
+test('loadDeciders caches for 24 h, refetches when stale, falls back to stale cache, then none', async () => {
+  const raw = [{ id: 'liquid/d1-ultra', name: 'D1', context_length: 32768, pricing: { prompt: '0.000000042' }, architecture: { input_modalities: ['text'], output_modalities: ['decisions'] } }];
+  const fail = async () => { throw new Error('offline'); };
+  const ls = memoryStorage();
+  ls.setItem('mc.decidersCache', JSON.stringify({ fetchedAt: NOW - 1000, raw }));
+  let fetched = 0;
+  const r1 = await M.loadDeciders({ ls, now: NOW, fetchDecidersFn: async () => { fetched++; return []; } });
+  assert.equal(fetched, 0); assert.equal(r1.source, 'cache'); assert.equal(r1.stale, false);
+  assert.deepEqual(r1.deciders.map((x) => x.id), ['liquid/d1-ultra']);
+
+  ls.setItem('mc.decidersCache', JSON.stringify({ fetchedAt: NOW - 25 * 3600e3, raw: [] }));
+  const r2 = await M.loadDeciders({ ls, now: NOW, fetchDecidersFn: async () => raw });
+  assert.equal(r2.source, 'network'); assert.equal(r2.stale, false); assert.equal(r2.deciders.length, 1);
+  assert.equal(JSON.parse(ls.getItem('mc.decidersCache')).fetchedAt, NOW);
+
+  ls.setItem('mc.decidersCache', JSON.stringify({ fetchedAt: NOW - 99 * 3600e3, raw }));
+  const r3 = await M.loadDeciders({ ls, now: NOW, fetchDecidersFn: fail });
+  assert.equal(r3.source, 'cache'); assert.equal(r3.stale, true); assert.equal(r3.deciders.length, 1);
+
+  const r4 = await M.loadDeciders({ ls: memoryStorage(), now: NOW, fetchDecidersFn: fail });
+  assert.deepEqual(r4, { deciders: [], stale: true, source: 'none' });
+});

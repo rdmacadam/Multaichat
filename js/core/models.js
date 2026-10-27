@@ -11,6 +11,7 @@
   const DAY = 86400e3;
   const CACHE_KEY = 'mc.modelsCache';
   const CACHE_TTL = DAY;
+  const DECIDERS_KEY = 'mc.decidersCache';
 
   const FLAGSHIP = ['anthropic', 'openai', 'google', 'x-ai', 'deepseek', 'meta-llama', 'mistralai', 'qwen'];
   // Providers whose models are open-weight. Entries ending in * are id prefixes.
@@ -32,6 +33,14 @@
   function isOpen(raw, provider) {
     if (raw.hugging_face_id) return true;
     return OPEN_PROVIDERS.some((p) => (p.endsWith('*') ? raw.id.startsWith(p.slice(0, -1)) : p === provider));
+  }
+
+  // First sentence (up to . ! or ? followed by whitespace or end), max 160 chars.
+  function shortDesc(text) {
+    const t = String(text == null ? '' : text).trim();
+    if (!t) return '';
+    const m = /^[\s\S]*?[.!?](?=\s|$)/.exec(t);
+    return (m ? m[0] : t).trim().slice(0, 160);
   }
 
   function normalize(raw) {
@@ -61,7 +70,32 @@
           inputs: ins,
           images: ins.includes('image'),
           files: ins.includes('file'),
+          router: Number(r.pricing && r.pricing.prompt) < 0,
+          desc: shortDesc(r.description),
           isNew(now = Date.now()) { return created > 0 && now - created <= 30 * DAY; },
+        };
+      });
+  }
+
+  function normalizeDeciders(raw) {
+    return (raw || [])
+      .filter((r) => r && r.id && r.architecture && Array.isArray(r.architecture.output_modalities) &&
+        r.architecture.output_modalities.includes('decisions'))
+      .map((r) => {
+        const priceIn = pricePerM(r.pricing && r.pricing.prompt);
+        const ins = Array.isArray(r.architecture.input_modalities) && r.architecture.input_modalities.length
+          ? r.architecture.input_modalities.slice() : ['text'];
+        return {
+          id: r.id,
+          name: r.name || r.id,
+          provider: r.id.split('/')[0],
+          priceIn,
+          context: r.context_length || 0,
+          inputs: ins,
+          images: ins.includes('image'),
+          files: ins.includes('file'),
+          free: /:free$/.test(r.id) || priceIn === 0,
+          desc: shortDesc(r.description),
         };
       });
   }
@@ -151,6 +185,24 @@
     }
   }
 
+  async function loadDeciders({ ls = globalThis.localStorage, fetchDecidersFn, now = Date.now(), force = false } = {}) {
+    let cache = null;
+    try { cache = JSON.parse(ls.getItem(DECIDERS_KEY)); } catch (e) { cache = null; }
+    if (cache && !Array.isArray(cache.raw)) cache = null;
+    if (cache && !force && now - cache.fetchedAt < CACHE_TTL && cache.raw.length) {
+      return { deciders: normalizeDeciders(cache.raw), stale: false, source: 'cache' };
+    }
+    try {
+      const raw = await fetchDecidersFn();
+      if (!raw || !raw.length) throw new Error('empty decider list');
+      try { ls.setItem(DECIDERS_KEY, JSON.stringify({ fetchedAt: now, raw })); } catch (e) { /* quota */ }
+      return { deciders: normalizeDeciders(raw), stale: false, source: 'network' };
+    } catch (e) {
+      if (cache && cache.raw.length) return { deciders: normalizeDeciders(cache.raw), stale: true, source: 'cache' };
+      return { deciders: [], stale: true, source: 'none' };
+    }
+  }
+
   function defaults(models, now) {
     const top = sections(models, now).top;
     const pool = top.length ? top : models;
@@ -177,5 +229,5 @@
     };
   }
 
-  return { FLAGSHIP, OPEN_PROVIDERS, FALLBACK_RAW, normalize, sections, search, sortBy, filter, activeFilterCount, loadCached, reconcileSelection };
+  return { FLAGSHIP, OPEN_PROVIDERS, FALLBACK_RAW, normalize, normalizeDeciders, sections, search, sortBy, filter, activeFilterCount, loadCached, loadDeciders, reconcileSelection };
 });
