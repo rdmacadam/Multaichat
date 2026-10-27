@@ -9,6 +9,8 @@ const NAMES = {
   openrouter: ['core/openrouter', 'api'],
   models: ['core/models', 'models'],
   conversation: ['core/conversation', 'conv'],
+  cost: ['core/cost', 'cost'],
+  router: ['core/router', 'router'],
   clarify: ['core/clarify', 'clarify'],
   fusion: ['core/fusion', 'fusion'],
   runner: ['core/runner', 'runner'],

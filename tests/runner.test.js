@@ -8,6 +8,7 @@ load('clarify');
 load('attach');
 const C = load('conversation');
 load('fusion');
+load('cost');
 const R = load('runner');
 
 const MODELS = [{ id: 'a/one', name: 'One' }, { id: 'b/two', name: 'Two' }];
@@ -133,6 +134,31 @@ test('runFusion stores parsed data, or raw on junk', async () => {
   await runner.runFusion(conv, turn.id, 'f/fuse');
   assert.equal(turn.fusion.status, 'error');
   assert.equal(turn.fusion.raw, 'I cannot do JSON');
+});
+
+test('runTldr stores usage and keeps the replaced cost', async () => {
+  const sum = async () => ({ content: '- s', usage: { cost: 0.0001, promptTokens: 5, completionTokens: 2 } });
+  const { runner, conv } = setup({ 'a/one': ok('A'), 'b/two': ok('B'), 's/sum': sum });
+  const turn = await runner.send(conv, 'broadcast', C.broadcastInputs(conv, 'q'));
+  await runner.runTldr(conv, turn.id, 's/sum');
+  assert.equal(turn.tldr.usage.cost, 0.0001);
+  assert.equal(turn.spentReplaced, undefined);
+  await runner.runTldr(conv, turn.id, 's/sum');
+  assert.equal(turn.tldr.usage.cost, 0.0001);
+  assert.equal(turn.spentReplaced.derived, 0.0001);
+});
+
+test('runFusion stores usage and keeps the replaced cost', async () => {
+  let reply = JSON.stringify({ overview: 'o', topics: [{ title: 'T', merged: 'm', models: ['a/one'], excerpts: [] }] });
+  const { runner, conv } = setup({ 'a/one': ok('A'), 'b/two': ok('B'), complete: async () => ({ content: reply, usage: { cost: 0.0002 } }) });
+  const turn = await runner.send(conv, 'broadcast', C.broadcastInputs(conv, 'q'));
+  await runner.runFusion(conv, turn.id, 'f/fuse');
+  assert.equal(turn.fusion.usage.cost, 0.0002);
+  reply = 'junk';
+  await runner.runFusion(conv, turn.id, 'f/fuse');
+  assert.equal(turn.fusion.status, 'error');
+  assert.equal(turn.fusion.usage.cost, 0.0002);
+  assert.equal(turn.spentReplaced.derived, 0.0002);
 });
 
 test('runFusion api error is stored as error', async () => {

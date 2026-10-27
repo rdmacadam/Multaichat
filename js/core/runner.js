@@ -141,6 +141,7 @@
 
     async function runTldr(conv, turnId, modelId) {
       const turn = MC.conv.turnById(conv, turnId);
+      if (turn.tldr) MC.cost.addReplaced(turn, 'derived', turn.tldr.usage);
       const d = (turn.tldr = { modelId, status: 'streaming', content: '', createdAt: Date.now() });
       onChange(conv, { turnId, derived: 'tldr' });
       const key = getKey();
@@ -153,6 +154,7 @@
         });
         d.content = res.content;
         d.status = 'done';
+        if (res.usage) d.usage = res.usage;
       } catch (err) {
         d.status = 'error';
         d.error = err.noKey ? NO_KEY : errText(err, modelId);
@@ -167,6 +169,7 @@
 
     async function runFusion(conv, turnId, modelId) {
       const turn = MC.conv.turnById(conv, turnId);
+      if (turn.fusion) MC.cost.addReplaced(turn, 'derived', turn.fusion.usage);
       turn.fusion = { modelId, status: 'streaming', createdAt: Date.now() };
       onChange(conv, { turnId, derived: 'fusion' });
       const key = getKey();
@@ -181,6 +184,7 @@
         turn.fusion = parsed.ok
           ? { modelId, status: 'done', data: parsed.data, createdAt: Date.now() }
           : { modelId, status: 'error', raw: parsed.raw, error: "Couldn't structure this", createdAt: Date.now() };
+        if (res.usage) turn.fusion.usage = res.usage;
       } catch (err) {
         turn.fusion = { modelId, status: 'error', error: err.noKey ? NO_KEY : errText(err, modelId), createdAt: Date.now() };
       } finally {
