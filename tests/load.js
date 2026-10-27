@@ -12,6 +12,8 @@ const NAMES = {
   clarify: ['core/clarify', 'clarify'],
   fusion: ['core/fusion', 'fusion'],
   runner: ['core/runner', 'runner'],
+  presets: ['core/presets', 'presets'],
+  attach: ['core/attach', 'attach'],
   markdown: ['ui/markdown', 'md'],
 };
 
