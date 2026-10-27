@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('./load');
 load('util');
+load('attach');
 const C = load('conversation');
 
 const MODELS = [{ id: 'a/one', name: 'One' }, { id: 'b/two', name: 'Two' }];
@@ -242,4 +243,66 @@ test('fork keeps system prompt and history', () => {
   assert.equal(f.systemPrompt, 'B');
   assert.equal(f.presetId, 'p2');
   assert.equal(C.promptAt(f, 0), 'A');
+});
+
+const IMG = { id: 'i1', kind: 'image', name: 'tiny.png', mime: 'image/png', size: 1 };
+const PDF = { id: 'p1', kind: 'pdf', name: 'doc.pdf', mime: 'application/pdf', size: 2 };
+const urls = { i1: 'data:image/png;base64,AA', p1: 'data:application/pdf;base64,BB' };
+const resolve = (id) => urls[id] || null;
+
+test('full turn builds content parts', () => {
+  const { conv, A } = twoLaneConv();
+  C.addTurn(conv, 'broadcast', C.broadcastInputs(conv, 'Look'), { attachments: [IMG, PDF], delivery: { [A]: 'full' } });
+  const m = C.buildMessages(conv, A, 0, resolve);
+  assert.deepEqual(m[0].content, [
+    { type: 'text', text: 'Look' },
+    { type: 'image_url', image_url: { url: urls.i1 } },
+    { type: 'file', file: { filename: 'doc.pdf', file_data: urls.p1 } },
+  ]);
+});
+
+test('empty text with image omits text part', () => {
+  const { conv, A } = twoLaneConv();
+  C.addTurn(conv, 'broadcast', { [A]: '' }, { attachments: [IMG], delivery: { [A]: 'full' } });
+  assert.deepEqual(C.buildMessages(conv, A, 0, resolve)[0].content, [{ type: 'image_url', image_url: { url: urls.i1 } }]);
+});
+
+test('text-delivered turn stays a string', () => {
+  const { conv, A, B } = twoLaneConv();
+  C.addTurn(conv, 'broadcast', { [A]: 'Look', [B]: 'Look\n\n[image omitted: tiny.png]' }, { attachments: [IMG], delivery: { [A]: 'full', [B]: 'text' } });
+  assert.equal(C.buildMessages(conv, B, 0, resolve)[0].content, 'Look\n\n[image omitted: tiny.png]');
+});
+
+test('history re-sends earlier images', () => {
+  const { conv, A } = twoLaneConv();
+  const t0 = C.addTurn(conv, 'broadcast', { [A]: 'Look' }, { attachments: [IMG], delivery: { [A]: 'full' } });
+  finish(t0, A, 'A cat');
+  C.addTurn(conv, 'targeted', { [A]: 'What colour?' });
+  const m = C.buildMessages(conv, A, 1, resolve);
+  assert.deepEqual(m[0].content[1], { type: 'image_url', image_url: { url: urls.i1 } });
+  assert.equal(m[2].content, 'What colour?');
+});
+
+test('missing record becomes unavailable text', () => {
+  const { conv, A } = twoLaneConv();
+  C.addTurn(conv, 'broadcast', { [A]: 'Look' }, { attachments: [IMG], delivery: { [A]: 'full' } });
+  assert.deepEqual(C.buildMessages(conv, A, 0)[0].content[1], { type: 'text', text: '[attachment unavailable: tiny.png]' });
+});
+
+test('addTurn stores extra fields only when present', () => {
+  const { conv, A, B } = twoLaneConv();
+  const plain = C.addTurn(conv, 'broadcast', { [A]: 'x' });
+  assert.equal('attachments' in plain, false);
+  const t = C.addTurn(conv, 'broadcast', { [A]: 'x' }, { attachments: [IMG], delivery: { [A]: 'full' }, skipped: { [B]: "can't read images" } });
+  assert.deepEqual(t.skipped, { [B]: "can't read images" });
+  assert.equal(B in t.responses, false);
+});
+
+test('attachmentIdsFor ignores text delivery and skipped lanes', () => {
+  const { conv, A, B } = twoLaneConv();
+  C.addTurn(conv, 'broadcast', { [A]: 'x', [B]: 'x [image omitted]' }, { attachments: [IMG, PDF], delivery: { [A]: 'full', [B]: 'text' } });
+  C.addTurn(conv, 'targeted', { [A]: 'y' }, { attachments: [{ id: 'i2', kind: 'image', name: 'b.png' }, { id: 't1', kind: 'text', name: 'n.md' }], delivery: { [A]: 'full' } });
+  assert.deepEqual(C.attachmentIdsFor(conv, A, 1), ['i1', 'p1', 'i2']);
+  assert.deepEqual(C.attachmentIdsFor(conv, A, 0), ['i1', 'p1']);
+  assert.deepEqual(C.attachmentIdsFor(conv, B, 1), []);
 });

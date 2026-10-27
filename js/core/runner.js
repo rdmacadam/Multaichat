@@ -10,7 +10,12 @@
 
   const NO_KEY = 'Add your OpenRouter API key in Settings';
 
-  function createRunner({ api = MC.api, getKey, save, onChange = () => {}, saveThrottleMs = 1000 }) {
+  // loadAttachments(ids) -> {id: dataURL}; getModel(id) -> catalog model (for PDF
+  // engine choice); getPdfMode() -> 'auto' | 'ocr'.
+  function createRunner({
+    api = MC.api, getKey, save, onChange = () => {}, saveThrottleMs = 1000,
+    loadAttachments = async () => ({}), getModel = () => undefined, getPdfMode = () => 'auto',
+  }) {
     // Every in-flight request: token -> { ctrl, convId, turnId }
     const inflight = new Map();
     // Conversations with requests in flight: id -> { conv, count }
@@ -56,10 +61,14 @@
       }
       const { token, ctrl } = begin(conv, turn.id + ':' + laneId);
       try {
+        const ids = MC.conv.attachmentIdsFor(conv, laneId, turn.index);
+        const urls = ids.length ? await loadAttachments(ids) : {};
+        const hasPdf = conv.turns.some((t) => (t.attachments || []).some((r) => r.kind === 'pdf' && ids.includes(r.id)));
         const res = await api.streamChat({
           key,
           model: lane.modelId,
-          messages: MC.conv.buildMessages(conv, laneId, turn.index),
+          messages: MC.conv.buildMessages(conv, laneId, turn.index, (id) => urls[id] || null),
+          plugins: hasPdf ? [{ id: 'file-parser', pdf: { engine: MC.attach.pdfEngine(getModel(lane.modelId), getPdfMode()) } }] : undefined,
           signal: ctrl.signal,
           onDelta(t) {
             r.content += t;
@@ -84,8 +93,8 @@
       }
     }
 
-    async function send(conv, kind, inputs) {
-      const turn = MC.conv.addTurn(conv, kind, inputs);
+    async function send(conv, kind, inputs, extra) {
+      const turn = MC.conv.addTurn(conv, kind, inputs, extra);
       await save(conv);
       onChange(conv, { turnId: turn.id });
       await Promise.all(Object.keys(inputs).map((laneId) => streamLane(conv, turn, laneId)));

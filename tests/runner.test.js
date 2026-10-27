@@ -5,6 +5,7 @@ const { load } = require('./load');
 load('util');
 const realApi = load('openrouter');
 load('clarify');
+load('attach');
 const C = load('conversation');
 load('fusion');
 const R = load('runner');
@@ -181,3 +182,36 @@ test('stopConversation aborts only that conversation', async () => {
   await p2;
 });
 
+
+test('pdf adds file-parser plugin with engine per model', async () => {
+  const PDFREF = { id: 'p1', kind: 'pdf', name: 'doc.pdf' };
+  const api = fakeApi({ 'a/one': ok('A'), 'b/two': ok('B') });
+  let mode = 'auto';
+  const runner = R.createRunner({
+    api, getKey: () => 'k', save: async () => {},
+    loadAttachments: async (ids) => Object.fromEntries(ids.map((id) => [id, 'data:application/pdf;base64,BB'])),
+    getModel: (id) => ({ 'a/one': { files: true }, 'b/two': { files: false } })[id],
+    getPdfMode: () => mode,
+  });
+  const conv = C.create(MODELS);
+  const [A, B] = conv.lanes.map((l) => l.id);
+  const extra = { attachments: [PDFREF], delivery: { [A]: 'full', [B]: 'full' } };
+  await runner.send(conv, 'broadcast', C.broadcastInputs(conv, 'Read'), extra);
+  const engine = (m) => api.calls.filter((c) => c.model === m).pop().plugins[0].pdf.engine;
+  assert.equal(engine('a/one'), 'native');
+  assert.equal(engine('b/two'), 'pdf-text');
+  const call = api.calls.find((c) => c.model === 'b/two');
+  assert.equal(call.messages[0].content[1].file.file_data, 'data:application/pdf;base64,BB');
+  mode = 'ocr';
+  await runner.send(conv, 'broadcast', C.broadcastInputs(conv, 'Again'));
+  assert.equal(engine('b/two'), 'mistral-ocr', 'earlier PDF in history still needs the plugin');
+});
+
+test('requests without PDFs carry no plugins; skipped lanes get no request', async () => {
+  const { runner, conv, A, B, api } = setup({ 'a/one': ok('A'), 'b/two': ok('B') });
+  const IMGREF = { id: 'i1', kind: 'image', name: 'tiny.png' };
+  await runner.send(conv, 'broadcast', { [A]: 'Look' }, { attachments: [IMGREF], delivery: { [A]: 'full' }, skipped: { [B]: "can't read images" } });
+  assert.deepEqual(api.calls.map((c) => c.model), ['a/one']);
+  assert.equal(api.calls[0].plugins, undefined);
+  assert.deepEqual(api.calls[0].messages[0].content[1], { type: 'text', text: '[attachment unavailable: tiny.png]' }, 'default loader resolves nothing');
+});

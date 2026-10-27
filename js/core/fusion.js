@@ -45,7 +45,9 @@
 
   function questionBlock(turn) {
     const qs = questionsOf(turn);
-    return (qs.length > 1 ? 'Question(s):\n' : 'Question:\n') + qs.map((q) => '> ' + q.replace(/\n/g, '\n> ')).join('\n\n');
+    const note = MC.attach ? MC.attach.summaryNote(turn.attachments || []) : '';
+    return (qs.length > 1 ? 'Question(s):\n' : 'Question:\n') + qs.map((q) => '> ' + q.replace(/\n/g, '\n> ')).join('\n\n') +
+      (note ? '\n\n' + note : '');
   }
 
   function tldrMessages(conv, turn) {

@@ -33,8 +33,12 @@
     return { status: 'streaming', content: '', previous: [], asksQuestion: false };
   }
 
-  function addTurn(conv, kind, inputs) {
+  // extra: { attachments: AttachmentRef[], delivery: {laneId: 'full'|'text'}, skipped: {laneId: reason} }
+  function addTurn(conv, kind, inputs, extra = {}) {
     const turn = { id: MC.util.uid('t_'), index: conv.turns.length, createdAt: Date.now(), kind, inputs: Object.assign({}, inputs), responses: {} };
+    if (extra.attachments && extra.attachments.length) turn.attachments = extra.attachments.slice();
+    if (extra.delivery && Object.keys(extra.delivery).length) turn.delivery = Object.assign({}, extra.delivery);
+    if (extra.skipped && Object.keys(extra.skipped).length) turn.skipped = Object.assign({}, extra.skipped);
     for (const laneId of Object.keys(inputs)) turn.responses[laneId] = emptyResponse();
     conv.turns.push(turn);
     if (conv.title === NEW_TITLE) {
@@ -84,9 +88,30 @@
     return (h && h.text) || null;
   }
 
+  const isPart = (r) => r.kind === 'image' || r.kind === 'pdf';
+
+  // Image/PDF refs of `turn` that `laneId` received in full (not text-only).
+  function fullRefs(turn, laneId) {
+    if (!turn.attachments || !(laneId in turn.inputs)) return [];
+    if ((turn.delivery && turn.delivery[laneId]) === 'text') return [];
+    return turn.attachments.filter(isPart);
+  }
+
+  function attachmentIdsFor(conv, laneId, uptoTurnIndex) {
+    return conv.turns.filter((t) => t.index <= uptoTurnIndex).flatMap((t) => fullRefs(t, laneId)).map((r) => r.id);
+  }
+
+  function userContent(turn, laneId, resolve) {
+    const text = turn.inputs[laneId];
+    const refs = fullRefs(turn, laneId);
+    if (!refs.length) return text;
+    return (text ? [{ type: 'text', text }] : []).concat(MC.attach.toParts(refs, resolve));
+  }
+
   // Messages to send a lane for turn `uptoTurnIndex`: its history before that
   // turn plus that turn's user input (never that turn's own answer).
-  function buildMessages(conv, laneId, uptoTurnIndex) {
+  // resolve(attachmentId) -> data URL; missing ones become a placeholder text part.
+  function buildMessages(conv, laneId, uptoTurnIndex, resolve) {
     const lane = laneById(conv, laneId);
     const msgs = [];
     const sys = promptAt(conv, uptoTurnIndex);
@@ -95,7 +120,7 @@
     for (const turn of conv.turns) {
       if (turn.index > uptoTurnIndex) break;
       if (!(laneId in turn.inputs)) continue;
-      msgs.push({ role: 'user', content: turn.inputs[laneId] });
+      msgs.push({ role: 'user', content: userContent(turn, laneId, resolve) });
       const r = turn.responses[laneId];
       if (turn.index < uptoTurnIndex && hasAnswer(r)) msgs.push({ role: 'assistant', content: r.content });
     }
@@ -175,5 +200,5 @@
     return Object.keys(turn.responses).filter((id) => hasAnswer(turn.responses[id]));
   }
 
-  return { NEW_TITLE, setSystemPrompt, promptAt, create, addTurn, broadcastInputs, laneById, turnById, buildMessages, addLane, removeLane, beginRetry, fork, recoverInterrupted, answeredLanes, touch };
+  return { NEW_TITLE, setSystemPrompt, promptAt, attachmentIdsFor, create, addTurn, broadcastInputs, laneById, turnById, buildMessages, addLane, removeLane, beginRetry, fork, recoverInterrupted, answeredLanes, touch };
 });

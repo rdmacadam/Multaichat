@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { load } = require('./load');
 load('util');
+load('attach');
 const C = load('conversation');
 const F = load('fusion');
 
@@ -73,4 +74,11 @@ test('invented quotes are marked unverified', () => {
 test('answersByModel builds model-id map from a turn', () => {
   const { conv, t } = convWithAnswers();
   assert.deepEqual(Object.keys(F.answersByModel(conv, t)), ['a/one', 'b/two']);
+});
+
+test('tldr mentions attachments', () => {
+  const { conv, t } = convWithAnswers();
+  t.attachments = [{ id: 'i1', kind: 'image', name: 'a.png' }, { id: 'p1', kind: 'pdf', name: 'd.pdf' }];
+  assert.match(F.tldrMessages(conv, t)[1].content, /\[1 image attached\] \[1 PDF attached\]/);
+  assert.match(F.fusionMessages(conv, t)[1].content, /\[1 image attached\]/);
 });

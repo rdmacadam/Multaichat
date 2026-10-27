@@ -142,3 +142,20 @@ test('errorMessage maps statuses', () => {
   assert.equal(api.errorMessage(new E('network', 'x'), 'a/b'), 'Network error — check your connection');
   assert.equal(api.errorMessage(new E(500, 'Upstream died'), 'a/b'), 'Upstream died');
 });
+
+test('streamChat forwards plugins and omits empty', async () => {
+  const bodies = [];
+  const fetchImpl = async (url, opts) => { bodies.push(JSON.parse(opts.body)); return sseResponse([delta('ok'), 'data: [DONE]\n\n']); };
+  const plugins = [{ id: 'file-parser', pdf: { engine: 'pdf-text' } }];
+  await api.streamChat({ key: 'k', model: 'm', messages: [], onDelta() {}, fetchImpl, plugins });
+  await api.streamChat({ key: 'k', model: 'm', messages: [], onDelta() {}, fetchImpl, plugins: [] });
+  assert.deepEqual(bodies[0].plugins, plugins);
+  assert.equal('plugins' in bodies[1], false);
+});
+
+test('complete forwards plugins', async () => {
+  let body;
+  const fetchImpl = async (url, opts) => { body = JSON.parse(opts.body); return jsonResponse({ choices: [{ message: { content: 'x' } }] }); };
+  await api.complete({ key: 'k', model: 'm', messages: [], fetchImpl, plugins: [{ id: 'file-parser', pdf: { engine: 'native' } }] });
+  assert.equal(body.plugins[0].pdf.engine, 'native');
+});

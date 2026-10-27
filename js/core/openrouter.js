@@ -77,11 +77,13 @@
     }
   }
 
-  async function streamChat({ key, model, messages, signal, onDelta, fetchImpl = globalThis.fetch }) {
+  const withPlugins = (body, plugins) => (Array.isArray(plugins) && plugins.length ? Object.assign(body, { plugins }) : body);
+
+  async function streamChat({ key, model, messages, signal, onDelta, plugins, fetchImpl = globalThis.fetch }) {
     const res = await doFetch(fetchImpl, BASE + '/chat/completions', {
       method: 'POST',
       headers: headers(key),
-      body: JSON.stringify({ model, messages, stream: true, usage: { include: true } }),
+      body: JSON.stringify(withPlugins({ model, messages, stream: true, usage: { include: true } }, plugins)),
       signal,
     }, signal);
     if (!res.ok) throw await errorFromResponse(res);
@@ -122,9 +124,9 @@
     return { content, usage, finishReason };
   }
 
-  async function complete({ key, model, messages, responseFormat, signal, fetchImpl = globalThis.fetch }) {
+  async function complete({ key, model, messages, responseFormat, signal, plugins, fetchImpl = globalThis.fetch }) {
     const send = async (withFormat) => {
-      const body = { model, messages, usage: { include: true } };
+      const body = withPlugins({ model, messages, usage: { include: true } }, plugins);
       if (withFormat) body.response_format = responseFormat;
       return doFetch(fetchImpl, BASE + '/chat/completions', { method: 'POST', headers: headers(key), body: JSON.stringify(body), signal }, signal);
     };
