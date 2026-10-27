@@ -196,6 +196,10 @@ dialog::backdrop { background: rgba(0,0,0,.35); }
 .model-meta { display: flex; gap: 6px; align-items: center; font-size: 12.5px; }
 .price { color: var(--muted); white-space: nowrap; }
 .all-tools { margin-bottom: 6px; }
+.filter-bar { gap: 6px 12px; font-size: 13px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+.filter-bar .num { width: 70px; padding: 3px 6px; }
+.filter-bar select { padding: 3px 6px; }
+.badge.img, .badge.file { border: 0; background: transparent; padding: 0; }
 .num { width: 80px; }
 .batch-item { display: grid; gap: 6px; }
 .batch-q { font-size: 14px; }

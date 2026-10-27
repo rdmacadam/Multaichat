@@ -29,7 +29,8 @@ function sse(text) {
 
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS' };
 
-// opts.delay: ms before each chat response; opts.failModels: true makes /models fail.
+// opts.delay: ms before each chat response; opts.failModels: true makes /models fail;
+// opts.requests: array that receives every chat request body.
 async function mockOpenRouter(page, opts = {}) {
   await page.route('https://openrouter.ai/api/v1/**', async (route) => {
     const req = route.request();
@@ -39,6 +40,7 @@ async function mockOpenRouter(page, opts = {}) {
     if (url.endsWith('/models')) return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify({ data: fixture.data.map((m) => Object.assign({}, m, { created: m.created + Math.floor((Date.now() - fixture.now) / 1000) })) }) });
     if (url.endsWith('/key')) return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify({ data: { label: 'test' } }) });
     const body = JSON.parse(req.postData() || '{}');
+    if (opts.requests) opts.requests.push(body);
     if (body.response_format || !body.stream) {
       return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { content: JSON.stringify(FUSION) } }] }) });
     }

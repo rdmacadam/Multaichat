@@ -16,6 +16,8 @@
     return [
       m.isNew(now) ? h('span', { class: 'badge new', title: 'Released in the last 30 days' }, '🆕') : null,
       m.open ? h('span', { class: 'badge open', title: 'Open-weight model' }, 'OPEN') : null,
+      m.images ? h('span', { class: 'badge img', title: 'Accepts images' }, '🖼') : null,
+      m.files ? h('span', { class: 'badge file', title: 'Accepts files (PDF)' }, '📄') : null,
     ];
   }
 
@@ -36,7 +38,7 @@
     const dlg = document.getElementById('picker-dialog');
     const app = MC.app;
     const sel = new Set(selected);
-    const ui = { query: '', showAllFree: false, showAllOpen: false, sort: 'newest', freeOnly: false, openOnly: false, maxPrice: '', active: 0 };
+    const ui = { query: '', showAllFree: false, showAllOpen: false, sort: 'newest', freeOnly: false, openOnly: false, active: 0 };
     let finished = false;
     clear(dlg);
 
@@ -70,19 +72,20 @@
       const keepScroll = body.scrollTop;
       clear(body);
       if (ui.query.trim()) {
-        const res = MC.models.search(models, ui.query, now());
-        body.append(res.length ? section(`Results (${res.length})`, res) : h('p', { class: 'muted empty' }, 'No models match.'));
+        const res = applyFilters(MC.models.search(models, ui.query, now()));
+        body.append(res.length ? section(`Results (${res.length})`, res) : noMatch());
       } else {
-        const s = MC.models.sections(models, now());
+        const raw = MC.models.sections(models, now());
+        const s = { top: applyFilters(raw.top), free: applyFilters(raw.free), open: applyFilters(raw.open), all: applyFilters(raw.all) };
         const more = (flag, n, label) => (n > 12 ? h('button', { class: 'link', onclick: () => { ui[flag] = !ui[flag]; render(); } }, ui[flag] ? 'Show fewer' : `${label} (${n})`) : null);
-        let all = MC.models.filter(MC.models.sortBy(s.all, ui.sort), { freeOnly: ui.freeOnly, openOnly: ui.openOnly, maxPrice: ui.maxPrice === '' ? null : ui.maxPrice });
+        let all = MC.models.filter(MC.models.sortBy(s.all, ui.sort), { freeOnly: ui.freeOnly, openOnly: ui.openOnly });
         const allTools = h('div', { class: 'row wrap all-tools' },
           h('select', { 'aria-label': 'Sort models', onchange: (e) => { ui.sort = e.target.value; render(); } },
             [['newest', 'Newest'], ['price', 'Cheapest'], ['context', 'Largest context']].map(([v, l]) => h('option', { value: v, selected: ui.sort === v }, l))),
           h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.freeOnly, onchange: (e) => { ui.freeOnly = e.target.checked; render(); } }), ' Free only'),
-          h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.openOnly, onchange: (e) => { ui.openOnly = e.target.checked; render(); } }), ' Open-weight only'),
-          h('label', { class: 'check' }, 'Max $/M out ', h('input', { type: 'number', min: '0', step: '0.5', class: 'num', value: ui.maxPrice, onchange: (e) => { ui.maxPrice = e.target.value; render(); } })));
-        body.append(
+          h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: ui.openOnly, onchange: (e) => { ui.openOnly = e.target.checked; render(); } }), ' Open-weight only'));
+        if (!s.all.length) body.append(noMatch());
+        else body.append(
           section('Top picks', s.top),
           section('Free', ui.showAllFree ? s.free : s.free.slice(0, 12), more('showAllFree', s.free.length, 'Show all free')),
           section('Open-weight: new & powerful', ui.showAllOpen ? MC.models.filter(MC.models.sortBy(s.all, 'newest'), { openOnly: true }) : s.open,
@@ -96,6 +99,56 @@
       highlight(Math.min(ui.active, rows().length - 1));
     }
 
+    // ---------- shared filters (persisted in settings.pickerFilters) ----------
+    const filters = Object.assign({}, MC.storage.DEFAULT_SETTINGS.pickerFilters, app.state.settings.get().pickerFilters);
+    function applyFilters(list) { return MC.models.filter(list, filters); }
+    const fCount = h('span', { class: 'filter-count muted small' });
+    const fMaxIn = h('input', { type: 'number', min: '0', step: '0.5', class: 'num filter-max-in', 'aria-label': 'Max input price per million tokens', placeholder: 'any' });
+    const fMaxOut = h('input', { type: 'number', min: '0', step: '0.5', class: 'num filter-max-out', 'aria-label': 'Max output price per million tokens', placeholder: 'any' });
+    const fCtx = h('select', { class: 'filter-context', 'aria-label': 'Minimum context length' },
+      [['', 'Any'], ['32000', '32k+'], ['128000', '128k+'], ['200000', '200k+'], ['1000000', '1M+']].map(([v, l]) => h('option', { value: v }, l)));
+    const fImg = h('input', { type: 'checkbox', class: 'filter-images' });
+    const fFile = h('input', { type: 'checkbox', class: 'filter-files' });
+    function syncFilterInputs() {
+      fMaxIn.value = filters.maxIn; fMaxOut.value = filters.maxOut; fCtx.value = String(filters.minContext || '');
+      fImg.checked = !!filters.images; fFile.checked = !!filters.files;
+      const n = MC.models.activeFilterCount(filters);
+      fCount.textContent = n ? `Filters (${n})` : 'Filters';
+      clearLink.hidden = !n;
+    }
+    function setFilter(k, v) {
+      filters[k] = v;
+      app.state.settings.set({ pickerFilters: Object.assign({}, filters) });
+      syncFilterInputs();
+      ui.active = 0;
+      render();
+    }
+    function clearFilters() {
+      Object.assign(filters, MC.storage.DEFAULT_SETTINGS.pickerFilters);
+      app.state.settings.set({ pickerFilters: Object.assign({}, filters) });
+      syncFilterInputs();
+      render();
+    }
+    function noMatch() {
+      return MC.models.activeFilterCount(filters)
+        ? h('div', { class: 'muted empty' }, 'No models match these filters. ', h('button', { class: 'link', onclick: clearFilters }, 'Clear filters'))
+        : h('p', { class: 'muted empty' }, 'No models match.');
+    }
+    fMaxIn.addEventListener('change', () => setFilter('maxIn', fMaxIn.value));
+    fMaxOut.addEventListener('change', () => setFilter('maxOut', fMaxOut.value));
+    fCtx.addEventListener('change', () => setFilter('minContext', fCtx.value));
+    fImg.addEventListener('change', () => setFilter('images', fImg.checked));
+    fFile.addEventListener('change', () => setFilter('files', fFile.checked));
+    const clearLink = h('button', { class: 'link small', onclick: clearFilters }, 'Clear filters');
+    const filterBar = h('div', { class: 'filter-bar row wrap' },
+      fCount,
+      h('label', { class: 'check' }, 'Max in $/M ', fMaxIn),
+      h('label', { class: 'check' }, 'Max out $/M ', fMaxOut),
+      h('label', { class: 'check' }, 'Min context ', fCtx),
+      h('label', { class: 'check' }, fImg, ' 🖼 Images'),
+      h('label', { class: 'check' }, fFile, ' 📄 Files'),
+      clearLink);
+
     const rows = () => [...body.querySelectorAll('.model-row')];
     function highlight(i) {
       const rs = rows();
@@ -107,7 +160,7 @@
 
     search.addEventListener('input', U.debounce(() => { ui.query = search.value; ui.active = 0; body.scrollTop = 0; render(); }, 100));
     dlg.addEventListener('keydown', (e) => {
-      if (e.target.tagName === 'SELECT' || (e.target.type === 'number')) return;
+      if (e.target.tagName === 'SELECT' || e.target.type === 'number' || e.target.type === 'checkbox') return;
       const rs = rows();
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -139,9 +192,11 @@
         h('h2', {}, mode === 'single' ? 'Choose a model' : 'Choose models'),
         h('div', { class: 'row' }, stale, refreshBtn, h('button', { class: 'icon', 'aria-label': 'Close', onclick: () => finish(mode === 'select') }, '✕'))),
       search,
+      filterBar,
       mode === 'select' ? h('div', { class: 'row spread picker-tools' }, count, freeBtn) : null,
       body,
       mode === 'select' ? h('footer', { class: 'dialog-foot' }, h('button', { class: 'primary', onclick: () => finish(true) }, 'Done')) : null));
+    syncFilterInputs();
     render();
     openDialog(dlg);
     search.focus();
@@ -158,7 +213,7 @@
       const app = MC.app;
       const have = new Set(app.state.conv ? app.state.conv.lanes.filter((l) => l.active).map((l) => l.modelId) : app.state.settings.get().selected);
       const pool = input.value.trim() ? MC.models.search(app.state.models, input.value) : MC.models.sections(app.state.models).top;
-      items = pool.filter((m) => !have.has(m.id)).slice(0, 8);
+      items = MC.models.filter(pool, app.state.settings.get().pickerFilters).filter((m) => !have.has(m.id)).slice(0, 8);
       active = 0;
       clear(list);
       items.forEach((m, i) => list.appendChild(h('div', {

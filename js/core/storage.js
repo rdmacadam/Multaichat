@@ -19,6 +19,7 @@
     autoFusion: false,
     theme: 'system',
     rememberKey: true,
+    pickerFilters: Object.freeze({ maxIn: '', maxOut: '', minContext: '', images: false, files: false }),
   });
 
   // Reading localStorage/indexedDB throws when the browser blocks site data.
