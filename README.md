@@ -16,6 +16,18 @@ Plain HTML/CSS/JavaScript with no build step and no dependencies. It runs entire
   - **↳ Reply** on an answer sends your next message to that model only.
   - When a model asks you something, a reply box appears right under its question.
   - If several models ask questions, **Answer them together** lets you give each one its own answer in one step.
+- **Model filters:** in the picker, set a max input and output price ($ per million tokens), a minimum context length, and "accepts images" / "accepts files". The filters apply to every section and to search, and are remembered. Models that accept images or PDFs show 🖼 / 📄.
+- **Presets:** a preset is a named bundle of a **system prompt**, a **message template** and a **set of models**; each part is optional.
+  - Three are built in (Concise expert, Code reviewer, Explain simply).
+  - **Save current as preset** captures the chat's system prompt, its models and whatever is in the message box. You can untick or edit any part before saving.
+  - The 📝 chip above the chat shows and edits the chat's system prompt. It shows "(edited)" when you've changed a preset's prompt, with **Update preset** or **Save as new preset**.
+  - You can choose a default preset for new chats in Settings.
+- **Attachments:** 📎, drag-and-drop onto the message box, or paste.
+  - **Images** (png, jpg, webp, gif; up to 20 MB, scaled down to 2048 px).
+  - **PDFs** (up to 20 MB). Models that read PDFs get the file itself; all others get the text via OpenRouter's free PDF parsing. Settings can switch them to OCR for scanned documents, which is paid.
+  - **Text and code files** (up to 200 KB). Their contents go into the message, so every model can read them.
+  - If some models can't read images, you're asked whether to **skip them** or **send them the text only**. You can tick "remember for this chat".
+  - Up to 10 files per message.
 - **Each model keeps its own thread.** A model only sees the messages that were sent to it. Columns that weren't asked in a turn say so.
 - **Fork** a chat from any turn, or **continue with just one model**.
 - **Retry** a single answer. Earlier versions are kept under "previous".
@@ -36,6 +48,7 @@ Plain HTML/CSS/JavaScript with no build step and no dependencies. It runs entire
 - Your API key and conversations are stored **only in this browser** (localStorage and IndexedDB). They are never written to this repository or sent to any server except OpenRouter.
 - Untick *Remember on this device* in Settings to keep the key only until you close the tab.
 - Browser storage is separate for each place the app is opened from, so the copy opened from disk and the one on GitHub Pages have separate histories. Use **Export** in the sidebar to make backups or move chats between them.
+- Attached files are stored in this browser alongside the chat and sent only to OpenRouter. Deleting a chat deletes its files, unless a fork of it still uses them. **Export** includes the files, so exports with images can be large.
 - *Clear all local data* in Settings removes the key, settings and all conversations.
 
 ## Keyboard shortcuts
@@ -57,8 +70,9 @@ Plain HTML/CSS/JavaScript with no build step and no dependencies. It runs entire
 ## Development
 
 ```
+npm run check    # production check: assets/paths for GitHub Pages, page loads under /Multaichat/ and from file://, all suites
 npm test         # unit tests for js/core and the markdown renderer (Node 22+, no deps)
-npm run smoke    # Playwright browser tests (flow + regressions) against a mocked OpenRouter
+npm run smoke    # Playwright browser tests (flow, regressions, Round A features) against a mocked OpenRouter
 ```
 
 Code layout: `js/core/*` holds the logic and has no page-handling code, so it is unit-tested in Node. `js/ui/*` builds the page. `js/app.js` connects the two. Scripts are loaded as plain `<script>` tags rather than ES modules, so the app also works when opened from disk.

@@ -51,11 +51,18 @@ async function mockOpenRouter(page, opts = {}) {
   });
 }
 
-function serve() {
+// mount: URL prefix the site is served under (GitHub Pages serves this repo at /Multaichat/).
+// root: directory to serve (defaults to the repo).
+function serve({ mount = '', root = ROOT } = {}) {
   const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
   const server = http.createServer((req, res) => {
-    const p = path.join(ROOT, decodeURIComponent(req.url.split('?')[0]).replace(/^\/$/, '/index.html'));
-    if (!p.startsWith(ROOT) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); res.end(); return; }
+    let url = decodeURIComponent(req.url.split('?')[0]);
+    if (mount) {
+      if (!url.startsWith(mount + '/')) { res.writeHead(404); res.end(); return; }
+      url = url.slice(mount.length);
+    }
+    const p = path.join(root, url.replace(/\/$/, '/index.html'));
+    if (!p.startsWith(root) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); res.end(); return; }
     res.writeHead(200, { 'content-type': types[path.extname(p)] || 'application/octet-stream' });
     fs.createReadStream(p).pipe(res);
   });
