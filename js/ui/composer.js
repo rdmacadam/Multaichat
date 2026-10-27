@@ -136,6 +136,15 @@
 
   function focus() { if (view.ta) view.ta.focus(); }
 
+  function insertTemplate(text) {
+    if (!view.ta || !text) return;
+    view.ta.value = view.ta.value.trim() ? view.ta.value.replace(/\s*$/, '') + '\n' + text : text;
+    view.fit();
+    focus();
+  }
+
+  function getText() { return view.ta ? view.ta.value : ''; }
+
   MC.ui = MC.ui || {};
-  MC.ui.composer = { mount, update, setTarget, focus, openBatch };
+  MC.ui.composer = { mount, update, setTarget, focus, openBatch, insertTemplate, getText };
 })(window.MC);

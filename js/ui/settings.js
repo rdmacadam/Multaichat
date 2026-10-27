@@ -46,12 +46,14 @@
 
     const autoTldr = h('input', { type: 'checkbox', checked: cfg.autoTldr });
     const autoFusion = h('input', { type: 'checkbox', checked: cfg.autoFusion });
+    const defPreset = h('select', { name: 'defaultPreset' }, h('option', { value: '' }, 'None'),
+      app.state.presets.list().map((p) => h('option', { value: p.id, selected: cfg.defaultPresetId === p.id }, p.name)));
     const theme = h('select', {}, ['system', 'light', 'dark'].map((t) => h('option', { value: t, selected: cfg.theme === t }, t[0].toUpperCase() + t.slice(1))));
 
     const save = () => {
       app.state.settings.set({
         rememberKey: remember.checked, summaryModel: picks.summaryModel, fusionModel: picks.fusionModel,
-        autoTldr: autoTldr.checked, autoFusion: autoFusion.checked, theme: theme.value,
+        autoTldr: autoTldr.checked, autoFusion: autoFusion.checked, theme: theme.value, defaultPresetId: defPreset.value || null,
       });
       app.state.settings.setKey(keyInput.value, remember.checked);
       applyTheme(theme.value);
@@ -81,6 +83,7 @@
           h('div', { class: 'row spread' }, h('span', {}, 'Fusion model'), pickBtn('fusionModel')),
           h('label', { class: 'check' }, autoTldr, ' Auto-run TL;DR when all answers finish'),
           h('label', { class: 'check' }, autoFusion, ' Auto-run Fusion when all answers finish')),
+        h('section', {}, h('div', { class: 'row spread' }, h('span', {}, 'Default preset for new chats'), defPreset)),
         h('section', {}, h('div', { class: 'row spread' }, h('span', {}, 'Theme'), theme)),
         h('section', {},
           h('p', { class: 'muted small' }, 'Conversations are saved in this browser only. Opening the app from a file and from a website keeps separate histories. Use Export in the sidebar for backups.'),

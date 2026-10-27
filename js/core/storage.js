@@ -20,6 +20,7 @@
     theme: 'system',
     rememberKey: true,
     pickerFilters: Object.freeze({ maxIn: '', maxOut: '', minContext: '', images: false, files: false }),
+    defaultPresetId: null,
   });
 
   // Reading localStorage/indexedDB throws when the browser blocks site data.
@@ -151,8 +152,10 @@
     return ls ? localStore(ls) : localStore(memoryLs(), 'memory');
   }
 
-  function exportJson(convs) {
-    return JSON.stringify({ app: 'multaichat', version: 1, exportedAt: Date.now(), conversations: convs }, null, 2);
+  function defaultLs() { return safeGlobal('localStorage') || memoryLs(); }
+
+  function exportJson(convs, { attachments = [], presets = [] } = {}) {
+    return JSON.stringify({ app: 'multaichat', version: 2, exportedAt: Date.now(), conversations: convs, attachments, presets }, null, 2);
   }
 
   function importJson(text, existing) {
@@ -170,5 +173,5 @@
     return [...map.values()];
   }
 
-  return { DEFAULT_SETTINGS, normalizeKey, createSettings, openStore, exportJson, importJson };
+  return { DEFAULT_SETTINGS, normalizeKey, createSettings, defaultLs, openStore, exportJson, importJson };
 });

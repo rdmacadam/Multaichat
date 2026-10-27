@@ -75,7 +75,7 @@ test('exportJson has app marker and no apiKey', () => {
   const text = storage.exportJson([{ id: 'a', updatedAt: 1 }]);
   const obj = JSON.parse(text);
   assert.equal(obj.app, 'multaichat');
-  assert.equal(obj.version, 1);
+  assert.equal(obj.version, 2);
   assert.equal(obj.conversations.length, 1);
   assert.ok(!/apiKey/i.test(text));
 });

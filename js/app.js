@@ -3,7 +3,8 @@
   'use strict';
   const { h, clear, toast, shortName, isTyping } = MC.dom;
 
-  const state = { settings: null, store: null, models: [], modelsInfo: null, metas: [], conv: null, runner: null };
+  const state = { settings: null, store: null, models: [], modelsInfo: null, metas: [], conv: null, runner: null, presets: null,
+    draft: {} }; // draft: system prompt chosen before the chat's first message
   const deleted = new Set(); // ids deleted while a request for them may still be in flight
 
   function modelById(id) { return state.models.find((m) => m.id === id); }
@@ -46,6 +47,7 @@
           h('button', { class: 'chip-x', 'aria-label': 'Remove ' + shortName(c.name), onclick: () => removeModel(c.id) }, '×'))),
         quick),
       h('button', { class: 'ghost', title: 'Choose models (/)', onclick: () => openModelPicker() }, 'Models'),
+      h('button', { class: 'ghost', title: 'Presets: system prompt, template and models', onclick: () => MC.ui.presets.open() }, 'Presets'),
       h('button', { class: 'icon', 'aria-label': 'Settings', title: 'Settings', onclick: () => MC.ui.settings.open() }, '⚙'));
   }
 
@@ -107,7 +109,34 @@
     if (state.conv) return state.conv;
     const ids = cfg().selected;
     state.conv = MC.conv.create(ids.map((id) => ({ id, name: (modelById(id) || { name: id }).name })));
+    if (state.draft.systemPrompt) MC.conv.setSystemPrompt(state.conv, state.draft.systemPrompt, state.draft.presetId);
+    state.draft = {};
     return state.conv;
+  }
+
+  // ---------- presets & system prompt ----------
+  // The chat's prompt state: the conversation, or the draft before it exists.
+  function promptHolder() { return state.conv || state.draft; }
+
+  function setChatSystemPrompt(text, presetId) {
+    if (state.conv) { MC.conv.setSystemPrompt(state.conv, text, presetId); save(state.conv); }
+    else state.draft = text && text.trim() ? { systemPrompt: text, presetId } : {};
+    refresh();
+  }
+
+  function applyPreset(id) {
+    const preset = state.presets.get(id);
+    if (!preset) return;
+    const plan = MC.presets.applyPlan(preset, state.conv);
+    if (plan.models) {
+      const midChat = state.conv && state.conv.turns.length;
+      if (!midChat) setSelection(plan.models);
+      else if (plan.confirmModels && confirm('Also switch models to ' + plan.models.map((m) => shortName((modelById(m) || { name: m }).name)).join(', ') + '?')) setSelection(plan.models);
+    }
+    if (plan.systemPrompt) setChatSystemPrompt(plan.systemPrompt, plan.presetId);
+    if (plan.template) MC.ui.composer.insertTemplate(plan.template);
+    refresh();
+    if (plan.template) MC.ui.composer.focus();
   }
 
   function blockedByBusy() {
@@ -159,6 +188,12 @@
 
   function newChat() {
     state.conv = null;
+    state.draft = {};
+    const def = cfg().defaultPresetId;
+    if (def && state.presets.get(def)) {
+      const p = state.presets.get(def);
+      if (p.systemPrompt) state.draft = { systemPrompt: p.systemPrompt, presetId: p.id };
+    }
     document.body.classList.remove('side-open');
     refresh();
     MC.ui.composer.focus();
@@ -222,6 +257,7 @@
 
   async function start() {
     state.settings = MC.storage.createSettings();
+    state.presets = MC.presets.createPresetStore(MC.storage.defaultLs());
     MC.ui.settings.applyTheme(cfg().theme);
     state.store = await MC.storage.openStore();
     if (state.store.kind === 'local') toast('Browser database unavailable — history stored in limited local storage', 'warn', 8000);
@@ -235,6 +271,7 @@
       if (conv && MC.conv.recoverInterrupted(conv)) await state.store.put(conv);
       state.conv = conv || null;
     }
+    if (!state.conv) { newChat(); return void document.body.classList.add('ready'); }
     refresh();
     document.body.classList.add('ready');
   }
@@ -242,7 +279,7 @@
   MC.app = {
     state, start, refresh, modelById, refreshModels, openModelPicker, setSelection, addModel, removeModel,
     sendBroadcast, sendTargeted, sendBatch, openConversation, newChat, deleteConversation, renameConversation,
-    importConversations, forkAt, save, ensureConv,
+    importConversations, forkAt, save, ensureConv, applyPreset, setChatSystemPrompt, promptHolder,
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

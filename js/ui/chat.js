@@ -227,6 +227,7 @@
     clear(root);
     view.pending.clear();
     if (!app().state.settings.getKey()) { firstRun(root); return; }
+    root.append(MC.ui.presets.chip());
     if (!conv || !conv.turns.length) { emptyState(root); return; }
     const lanes = visibleLanes(conv);
     if (view.activeCol >= lanes.length) view.activeCol = 0;

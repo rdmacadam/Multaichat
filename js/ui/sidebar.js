@@ -83,8 +83,8 @@
         search),
       list,
       h('div', { class: 'side-foot' },
-        h('button', { class: 'ghost small', dataset: { exportCurrent: '1' }, disabled: !app.state.conv, onclick: () => download(`multaichat-${stamp()}.json`, MC.storage.exportJson([app.state.conv])) }, 'Export chat'),
-        h('button', { class: 'ghost small', onclick: async () => download(`multaichat-all-${stamp()}.json`, MC.storage.exportJson(await app.state.store.all())) }, 'Export all'),
+        h('button', { class: 'ghost small', dataset: { exportCurrent: '1' }, disabled: !app.state.conv, onclick: () => download(`multaichat-${stamp()}.json`, MC.storage.exportJson([app.state.conv], { presets: app.state.presets.userPresets() })) }, 'Export chat'),
+        h('button', { class: 'ghost small', onclick: async () => download(`multaichat-all-${stamp()}.json`, MC.storage.exportJson(await app.state.store.all(), { presets: app.state.presets.userPresets() })) }, 'Export all'),
         h('button', { class: 'ghost small', onclick: () => fileInput.click() }, 'Import'),
         fileInput));
   }
