@@ -1,0 +1,165 @@
+{
+  "data": [
+    {
+      "id": "liquid/d1-ultra",
+      "name": "LiquidAI: d1-ultra",
+      "created": 1792108354,
+      "description": "d1-ultra is Liquid AI's largest decision model, served as a System One endpoint. Send a state of text and images along with typed questions, and it returns a choice, a...",
+      "context_length": 32768,
+      "pricing": {
+        "prompt": "0.000000042",
+        "completion": "0",
+        "input_cache_read": "0.000000042"
+      },
+      "architecture": {
+        "modality": "text+image->decisions",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "decisions"
+        ],
+        "tokenizer": "Other",
+        "instruct_type": null
+      }
+    },
+    {
+      "id": "typesafe/jev-1.14",
+      "name": "TypeSafe: Jev 1.14",
+      "created": 1792021417,
+      "description": "Jev 1.14 is the latest version of Jev, TypeSafe's structured decision model and the first of its System One models. System One models make fast, structured decisions for software, returning...",
+      "context_length": 262144,
+      "pricing": {
+        "prompt": "0.000000042",
+        "completion": "0"
+      },
+      "architecture": {
+        "modality": "text+image->decisions",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "decisions"
+        ],
+        "tokenizer": "Other",
+        "instruct_type": null
+      }
+    },
+    {
+      "id": "inception/mercury-decide",
+      "name": "Inception: Mercury Decide",
+      "created": 1790789334,
+      "description": "Mercury Decide is Inception's structured decision model, served as a System One endpoint. Send a state along with typed questions, and it returns a choice, a score, or a yes/no...",
+      "context_length": 65536,
+      "pricing": {
+        "prompt": "0.00000002",
+        "completion": "0",
+        "input_cache_read": "0"
+      },
+      "architecture": {
+        "modality": "text+image->decisions",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "decisions"
+        ],
+        "tokenizer": "Other",
+        "instruct_type": null
+      }
+    },
+    {
+      "id": "perplexity/pplx-decider-v1.2",
+      "name": "Perplexity: Decider V1.2",
+      "created": 1792183495,
+      "description": "Decider V1.2 is a new 27B checkpoint of Perplexity's decision model, succeeding [Decider V1.1 27B](/perplexity/pplx-decider-v1.1-27b) with the same API contract. Instead of generating text, it reads content passed as `state`...",
+      "context_length": 262144,
+      "pricing": {
+        "prompt": "0.00000002",
+        "completion": "0"
+      },
+      "architecture": {
+        "modality": "text+image->decisions",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "decisions"
+        ],
+        "tokenizer": "Other",
+        "instruct_type": null
+      }
+    },
+    {
+      "id": "baseten/mammoth-1:free",
+      "name": "Baseten: Mammoth 1 (free)",
+      "created": 1792622578,
+      "description": "Mammoth 1 is a 27B decision model from Base Labs, Baseten's research team, built on Qwen3.5-27B. Given a state (text or JSON) and typed questions (yes/no, multiple choice, or ordinal...",
+      "context_length": 16384,
+      "pricing": {
+        "prompt": "0",
+        "completion": "0"
+      },
+      "architecture": {
+        "modality": "text->decisions",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "decisions"
+        ],
+        "tokenizer": "Other",
+        "instruct_type": null
+      }
+    },
+    {
+      "id": "baseten/elephant-1:free",
+      "name": "Baseten: Elephant 1 (free)",
+      "created": 1792622577,
+      "description": "Elephant 1 is a 9B decision model from Base Labs, Baseten's research team, built on Qwen3.5-9B. Given a state (text or JSON) and typed questions (yes/no, multiple choice, or ordinal...",
+      "context_length": 16384,
+      "pricing": {
+        "prompt": "0",
+        "completion": "0"
+      },
+      "architecture": {
+        "modality": "text->decisions",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "decisions"
+        ],
+        "tokenizer": "Other",
+        "instruct_type": null
+      }
+    },
+    {
+      "id": "upstage/solar-decide",
+      "name": "Upstage: Solar Decide",
+      "created": 1790592657,
+      "description": "Solar Decide is Upstage's structured decision model, served as a System One endpoint on Solar Mini 4. Send a state along with typed questions, and it returns a choice, a...",
+      "context_length": 524288,
+      "pricing": {
+        "prompt": "0.00000005",
+        "completion": "0",
+        "input_cache_read": "0.00000005"
+      },
+      "architecture": {
+        "modality": "text->decisions",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "decisions"
+        ],
+        "tokenizer": "Other",
+        "instruct_type": null
+      }
+    }
+  ]
+}

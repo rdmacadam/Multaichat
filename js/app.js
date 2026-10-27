@@ -27,7 +27,38 @@
     else if (info.derived) MC.ui.chat.updateDerived(conv, info.turnId);
     else MC.ui.chat.render(conv);
     MC.ui.composer.update();
+    updateCostThrottled();
   }
+
+  // ---------- chat cost counter ----------
+  const COST_INFO = 'What this chat has cost so far: answers, earlier versions, router decisions, TL;DR, Fusion and judge.';
+  const COST_LINES = [['answers', 'Answers'], ['earlier', 'Earlier versions'], ['router', 'Router decisions'], ['derived', 'TL;DR & Fusion'], ['judge', 'Judge']];
+
+  function costView(conv) {
+    const sum = MC.cost.summary(conv);
+    const narrow = window.matchMedia('(max-width: 800px)').matches;
+    let amount = sum.total === 0 ? '$0.00' : narrow ? '$' + sum.total.toFixed(2) : MC.util.formatCost(sum.total);
+    if (sum.unknown > 0) amount = '≥ ' + amount;
+    const lines = COST_LINES.filter(([k]) => sum.parts[k] > 0).map(([k, label]) => label + ': ' + MC.util.formatCost(sum.parts[k]));
+    if (sum.unknown > 0) lines.push(sum.unknown + (sum.unknown === 1 ? ' request had no price' : ' requests had no price'));
+    return { label: (narrow ? '' : 'Σ ') + amount, lines };
+  }
+
+  function updateCost() {
+    const btn = document.getElementById('cost');
+    if (!btn) return;
+    const { label, lines } = costView(state.conv);
+    const text = lines.length ? lines.join('\n') : 'No cost yet.';
+    if (btn.textContent !== label) btn.textContent = label;
+    btn.title = text.replace(/\n/g, ' · ');
+    const tip = btn.parentElement.querySelector('.tip');
+    if (tip && tip.dataset.lines !== text) {
+      tip.dataset.lines = text;
+      tip.textContent = COST_INFO + '\n\n' + text;
+    }
+  }
+  const updateCostThrottled = MC.util.throttle(updateCost, 250);
+  window.matchMedia('(max-width: 800px)').addEventListener('change', updateCost);
 
   // ---------- header ----------
   function renderHeader() {
@@ -48,11 +79,13 @@
         quick),
       h('button', { class: 'ghost', title: 'Choose models (/)', onclick: () => openModelPicker() }, 'Models'),
       h('button', { class: 'ghost', title: 'Presets: system prompt, template and models', onclick: () => MC.ui.presets.open() }, 'Presets'),
+      h('span', { class: 'cost-wrap' }, h('button', { class: 'ghost', id: 'cost', 'aria-label': 'Chat cost' }, 'Σ $0.00'), MC.dom.info(COST_INFO)),
       h('button', { class: 'icon', 'aria-label': 'Settings', title: 'Settings', onclick: () => MC.ui.settings.open() }, '⚙'));
   }
 
   function refresh() {
     renderHeader();
+    updateCost();
     MC.ui.chat.render(state.conv);
     MC.ui.composer.update();
     MC.ui.sidebar.render(state.metas, state.conv && state.conv.id);
@@ -330,7 +363,7 @@
   MC.app = {
     state, start, refresh, modelById, refreshModels, openModelPicker, setSelection, addModel, removeModel,
     sendBroadcast, sendTargeted, sendBatch, openConversation, newChat, deleteConversation, renameConversation,
-    importConversations, forkAt, save, ensureConv, applyPreset, setChatSystemPrompt, promptHolder, sendWithAttachments,
+    importConversations, forkAt, save, ensureConv, applyPreset, setChatSystemPrompt, promptHolder, sendWithAttachments, updateCost,
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

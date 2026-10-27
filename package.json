@@ -4,7 +4,7 @@
   "description": "Ask several OpenRouter models at once, compare, summarize and fuse their answers.",
   "scripts": {
     "test": "node --test \"tests/*.test.js\"",
-    "smoke": "node tests/smoke.pw.js && node tests/regressions.pw.js && node tests/round-a.pw.js",
+    "smoke": "node tests/smoke.pw.js && node tests/regressions.pw.js && node tests/round-a.pw.js && node tests/round-b.pw.js",
     "check": "node scripts/check.js"
   }
 }

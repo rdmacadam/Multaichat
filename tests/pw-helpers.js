@@ -6,6 +6,7 @@ const fs = require('fs');
 
 const ROOT = path.join(__dirname, '..');
 const fixture = require('./fixtures/models.json');
+const deciders = require('./fixtures/deciders.json');
 
 const ANSWERS = {
   'anthropic/claude-sonnet-5': 'Happy to help with your trip.\n\nWhat month are you going?',
@@ -21,21 +22,56 @@ const FUSION = {
   disagreements: [], unique: [{ model: 'google/gemini-3-pro', point: 'Asks about budget' }],
 };
 
-function sse(text) {
+function sse(text, model) {
   const parts = text.match(/.{1,12}/gs) || [''];
-  return parts.map((p) => 'data: ' + JSON.stringify({ choices: [{ delta: { content: p } }] }) + '\n\n').join('') +
-    'data: ' + JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 20, cost: 0.00042 } }) + '\n\ndata: [DONE]\n\n';
+  const extra = model ? { model } : {};
+  return parts.map((p) => 'data: ' + JSON.stringify(Object.assign({ choices: [{ delta: { content: p } }] }, extra)) + '\n\n').join('') +
+    'data: ' + JSON.stringify({ ...extra, choices: [{ delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 20, cost: 0.00042 } }) + '\n\ndata: [DONE]\n\n';
 }
 
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS' };
 
 // opts.delay: ms before each chat response; opts.failModels: true makes /models fail;
 // opts.requests: array that receives every chat request body.
+// opts.noDeciders: the decisions list is empty; opts.decisions: array that receives every decision body;
+// opts.decideStatus: {modelId: httpStatus} makes that decision model fail.
+// Default decision answer: pick = labels in criteria order with halving probabilities, task = chat,
+// best = last label at 0.7.
+function decisionAnswer(body) {
+  const answers = {};
+  for (const [name, q] of Object.entries(body.questions || {})) {
+    const labels = Object.keys(q.criteria || {});
+    if (name === 'task') answers[name] = { choice: 'chat' };
+    else if (name === 'best') {
+      const last = labels[labels.length - 1];
+      answers[name] = { choice: last, probabilities: Object.fromEntries(labels.map((l) => [l, l === last ? 0.7 : 0.3 / Math.max(1, labels.length - 1)])) };
+    } else {
+      let p = 0.5;
+      const probabilities = {};
+      for (const l of labels) { probabilities[l] = p; p /= 2; }
+      answers[name] = { choice: labels[0], probabilities };
+    }
+  }
+  return { model: body.model, answers, usage: { input_tokens: 100, output_tokens: 0, cost: 0.000002 } };
+}
+
 async function mockOpenRouter(page, opts = {}) {
+  await page.route('https://openrouter.ai/api/alpha/**', async (route) => {
+    const req = route.request();
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+    const body = JSON.parse(req.postData() || '{}');
+    if (opts.decisions) opts.decisions.push(body);
+    const status = opts.decideStatus && opts.decideStatus[body.model];
+    if (status) return route.fulfill({ status, headers: CORS, contentType: 'application/json', body: JSON.stringify({ error: { code: status, message: 'decision failed' } }) });
+    return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(decisionAnswer(body)) });
+  });
   await page.route('https://openrouter.ai/api/v1/**', async (route) => {
     const req = route.request();
     const url = req.url();
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
+    if (url.includes('/models?output_modalities=decisions')) {
+      return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(opts.noDeciders ? { data: [] } : deciders) });
+    }
     if (url.endsWith('/models') && opts.failModels) return route.abort();
     if (url.endsWith('/models')) return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify({ data: fixture.data.map((m) => Object.assign({}, m, { created: m.created + Math.floor((Date.now() - fixture.now) / 1000) })) }) });
     if (url.endsWith('/key')) return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify({ data: { label: 'test' } }) });
@@ -47,7 +83,7 @@ async function mockOpenRouter(page, opts = {}) {
     const sys = body.messages[0] && body.messages[0].role === 'system' ? body.messages[0].content : '';
     const text = sys.startsWith('Summarize') ? '- Tokyo first\n- Two models asked questions' : (ANSWERS[body.model] || 'OK from ' + body.model);
     await new Promise((r) => setTimeout(r, opts.delay != null ? opts.delay : 150));
-    return route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'text/event-stream' }, CORS), body: sse(text) });
+    return route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'text/event-stream' }, CORS), body: sse(text, body.model === 'openrouter/auto' ? 'openai/gpt-6' : null) });
   });
 }
 

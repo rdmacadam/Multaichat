@@ -70,5 +70,36 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
-  MC.dom = { h, append, clear, toast, openDialog, closeDialog, copyText, shortName, isTyping, autoGrow, download };
+  // ⓘ button with a tooltip: hover (600 ms), focus, click toggles; leave, blur, Escape hide.
+  let infoSeq = 0;
+  function info(text) {
+    const id = 'tip-' + (++infoSeq);
+    const tip = h('span', { role: 'tooltip', id, class: 'tip', hidden: true }, text);
+    const btn = h('button', { type: 'button', class: 'info', 'aria-label': 'More info', 'aria-describedby': id }, 'ⓘ');
+    let timer = null;
+    const place = () => {
+      const r = btn.getBoundingClientRect();
+      const w = tip.offsetWidth, ht = tip.offsetHeight;
+      const left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8));
+      const top = r.top - ht - 6 < 8 ? r.bottom + 6 : r.top - ht - 6;
+      tip.style.left = left + 'px'; tip.style.top = top + 'px';
+    };
+    const show = () => { clearTimeout(timer); tip.hidden = false; place(); };
+    const hide = () => { clearTimeout(timer); tip.hidden = true; };
+    btn.addEventListener('mouseenter', () => { clearTimeout(timer); timer = setTimeout(show, 600); });
+    btn.addEventListener('mouseleave', hide);
+    btn.addEventListener('focus', show);
+    btn.addEventListener('blur', hide);
+    // A press that moves focus onto the button has already shown the tip; its click must not hide it again.
+    let pressFocused = false;
+    btn.addEventListener('pointerdown', () => { pressFocused = document.activeElement !== btn; });
+    btn.addEventListener('click', () => {
+      if (pressFocused) { pressFocused = false; if (!tip.hidden) return; }
+      if (tip.hidden) show(); else hide();
+    });
+    btn.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !tip.hidden) { e.stopPropagation(); hide(); } });
+    return h('span', { class: 'info-wrap' }, btn, tip);
+  }
+
+  MC.dom = { info, h, append, clear, toast, openDialog, closeDialog, copyText, shortName, isTyping, autoGrow, download };
 })(window.MC = window.MC || {});

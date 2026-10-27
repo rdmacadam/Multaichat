@@ -82,6 +82,7 @@ async function loads(browser, url) {
       ['browser flow (smoke)', 'node', ['tests/smoke.pw.js']],
       ['browser regressions', 'node', ['tests/regressions.pw.js']],
       ['browser Round A', 'node', ['tests/round-a.pw.js']],
+      ['browser Round B', 'node', ['tests/round-b.pw.js']],
     ]) {
       const r = spawnSync(cmd, args, { cwd: REPO, encoding: 'utf8' });
       const out = (r.stdout || '') + (r.stderr || '');
