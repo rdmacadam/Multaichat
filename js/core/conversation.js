@@ -90,10 +90,11 @@
 
   const isPart = (r) => r.kind === 'image' || r.kind === 'pdf';
 
-  // Image/PDF refs of `turn` that `laneId` received in full (not text-only).
+  // Image/PDF refs `laneId` received with `turn`. Text-only lanes (models that
+  // can't see images) still get PDFs, which OpenRouter parses for any model.
   function fullRefs(turn, laneId) {
     if (!turn.attachments || !(laneId in turn.inputs)) return [];
-    if ((turn.delivery && turn.delivery[laneId]) === 'text') return [];
+    if ((turn.delivery && turn.delivery[laneId]) === 'text') return turn.attachments.filter((r) => r.kind === 'pdf');
     return turn.attachments.filter(isPart);
   }
 

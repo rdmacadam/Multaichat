@@ -298,11 +298,21 @@ test('addTurn stores extra fields only when present', () => {
   assert.equal(B in t.responses, false);
 });
 
-test('attachmentIdsFor ignores text delivery and skipped lanes', () => {
+test('attachmentIdsFor drops images for text delivery and skips lanes not asked', () => {
   const { conv, A, B } = twoLaneConv();
   C.addTurn(conv, 'broadcast', { [A]: 'x', [B]: 'x [image omitted]' }, { attachments: [IMG, PDF], delivery: { [A]: 'full', [B]: 'text' } });
   C.addTurn(conv, 'targeted', { [A]: 'y' }, { attachments: [{ id: 'i2', kind: 'image', name: 'b.png' }, { id: 't1', kind: 'text', name: 'n.md' }], delivery: { [A]: 'full' } });
   assert.deepEqual(C.attachmentIdsFor(conv, A, 1), ['i1', 'p1', 'i2']);
   assert.deepEqual(C.attachmentIdsFor(conv, A, 0), ['i1', 'p1']);
-  assert.deepEqual(C.attachmentIdsFor(conv, B, 1), []);
+  assert.deepEqual(C.attachmentIdsFor(conv, B, 1), ['p1']);
+});
+
+test('text-only lanes still receive PDFs, just not images', () => {
+  const { conv, A, B } = twoLaneConv();
+  C.addTurn(conv, 'broadcast', { [A]: 'Look', [B]: 'Look\n\n[image omitted: tiny.png]' }, { attachments: [IMG, PDF], delivery: { [A]: 'full', [B]: 'text' } });
+  assert.deepEqual(C.buildMessages(conv, B, 0, resolve)[0].content, [
+    { type: 'text', text: 'Look\n\n[image omitted: tiny.png]' },
+    { type: 'file', file: { filename: 'doc.pdf', file_data: urls.p1 } },
+  ]);
+  assert.deepEqual(C.attachmentIdsFor(conv, B, 0), ['p1']);
 });

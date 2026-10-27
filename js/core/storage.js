@@ -22,6 +22,7 @@
     rememberKey: true,
     pickerFilters: Object.freeze({ maxIn: '', maxOut: '', minContext: '', images: false, files: false }),
     defaultPresetId: null,
+    pdfMode: 'auto',
   });
 
   // Reading localStorage/indexedDB throws when the browser blocks site data.

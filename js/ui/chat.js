@@ -131,12 +131,14 @@
     const base = { class: 'cell' + (col === view.activeCol ? ' active' : ''), dataset: { cell: key, col } };
     if (!(lane.id in turn.inputs)) {
       base.class += ' not-asked';
-      return h('div', base, h('span', { class: 'muted small' }, '— not asked this turn'));
+      const reason = turn.skipped && turn.skipped[lane.id];
+      return h('div', base, h('span', { class: 'muted small' }, reason ? '— not sent: ' + reason : '— not asked this turn'));
     }
     const r = turn.responses[lane.id];
     base.class += ' status-' + r.status;
     const runner = app().state.runner;
-    const uniqueInputs = new Set(Object.values(turn.inputs)).size;
+    const uniqueInputs = new Set(mainInputs(turn)).size;
+    const textOnly = turn.delivery && turn.delivery[lane.id] === 'text';
     const actions = [];
     if (r.status === 'streaming') actions.push(h('button', { class: 'ghost small', onclick: () => runner.stop(turn.id, lane.id) }, '■ Stop'));
     else {
@@ -147,8 +149,9 @@
     }
     const paid = r.status === 'error' && r.errorStatus === 429 ? paidVariant(lane) : null;
     return h('div', base,
-      h('div', { class: 'cell-head' }, h('span', { class: 'cell-model' }, shortName(lane.modelName)), statusLine(r)),
-      uniqueInputs > 1 ? h('div', { class: 'cell-input' }, h('span', { class: 'muted small' }, 'You: '), turn.inputs[lane.id]) : null,
+      h('div', { class: 'cell-head' }, h('span', { class: 'cell-model' }, shortName(lane.modelName),
+        textOnly ? h('span', { class: 'badge tag-text-only', title: 'Attachments were left out for this model' }, 'text only') : null), statusLine(r)),
+      uniqueInputs > 1 && !textOnly ? h('div', { class: 'cell-input' }, h('span', { class: 'muted small' }, 'You: '), displayText(turn.inputs[lane.id])) : null,
       h('div', { class: 'md', html: r.content ? MC.md.render(r.content) : r.status === 'streaming' ? '<p class="muted">…</p>' : '' }),
       r.status === 'error' ? h('div', { class: 'cell-error', role: 'alert' }, '⚠ ', r.error || 'Error',
         paid ? h('button', { class: 'ghost small', onclick: () => { lane.modelId = paid.id; lane.modelName = paid.name; runner.retry(conv, turn.id, lane.id); app().refresh(); } }, 'Use paid variant') : null) : null,
@@ -158,18 +161,46 @@
       h('div', { class: 'cell-actions' }, actions));
   }
 
+  // Inputs of lanes that got the full message (text-only lanes carry extra notes).
+  function mainInputs(turn) {
+    return Object.keys(turn.inputs).filter((id) => !(turn.delivery && turn.delivery[id] === 'text')).map((id) => turn.inputs[id]);
+  }
+
+  // Inlined text files are shown as file chips, not as their full contents.
+  function displayText(input) {
+    return String(input || '').replace(/\n*--- file: (.+?) ---\n[\s\S]*?\n--- end of \1 ---/g, '').trim();
+  }
+
+  function attachmentEl(ref) {
+    const el = ref.kind === 'image'
+      ? h('a', { class: 'att-thumb', target: '_blank', rel: 'noopener', title: ref.name }, h('img', { alt: ref.name }))
+      : h('a', { class: 'att-file', download: ref.name, title: 'Download ' + ref.name }, (ref.kind === 'pdf' ? '📄 ' : '📝 ') + ref.name);
+    app().state.store.getAttachment(ref.id).then(async (rec) => {
+      if (!rec) { el.classList.add('missing'); el.title = ref.name + ' (unavailable)'; return; }
+      const url = await MC.files.objectUrl(rec);
+      el.href = url;
+      const img = el.querySelector('img');
+      if (img) img.src = url;
+    }).catch(() => el.classList.add('missing'));
+    return el;
+  }
+
   function promptRow(conv, turn) {
-    const vals = Object.values(turn.inputs);
-    const unique = [...new Set(vals)];
+    const unique = [...new Set(mainInputs(turn))];
     const ids = Object.keys(turn.inputs);
+    const addressed = ids.length + Object.keys(turn.skipped || {}).length;
     const allActive = conv.lanes.filter((l) => l.active).length;
     let label;
     if (turn.kind === 'clarify-batch' || unique.length > 1) label = 'You answered each model';
-    else if (turn.kind === 'targeted' || ids.length < allActive) label = 'You → ' + ids.map((id) => shortName((MC.conv.laneById(conv, id) || {}).modelName)).join(', ') + ' only';
+    else if (turn.kind === 'targeted' || addressed < allActive) label = 'You → ' + ids.map((id) => shortName((MC.conv.laneById(conv, id) || {}).modelName)).join(', ') + ' only';
     else label = 'You → all';
+    const text = unique.length === 1 ? displayText(unique[0]) : '';
+    const atts = turn.attachments || [];
     return h('div', { class: 'prompt' },
       h('div', { class: 'prompt-label muted small' }, label),
-      unique.length === 1 ? h('div', { class: 'bubble' }, unique[0]) : null);
+      text || atts.length ? h('div', { class: 'bubble' },
+        atts.length ? h('div', { class: 'att-row' }, atts.map(attachmentEl)) : null,
+        text || null) : null);
   }
 
   function turnActions(conv, turn) {

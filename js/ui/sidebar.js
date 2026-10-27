@@ -44,6 +44,13 @@
       }, '🗑'));
   }
 
+  async function exportText(convs) {
+    const app = MC.app;
+    const ids = [...new Set(convs.flatMap(MC.storage.refsOf))];
+    const attachments = await app.state.store.attachmentsFor(ids);
+    return MC.storage.exportJson(convs, { attachments, presets: app.state.presets.userPresets() });
+  }
+
   function render(metas, currentId) {
     const app = MC.app;
     const root = document.getElementById('sidebar');
@@ -83,8 +90,8 @@
         search),
       list,
       h('div', { class: 'side-foot' },
-        h('button', { class: 'ghost small', dataset: { exportCurrent: '1' }, disabled: !app.state.conv, onclick: () => download(`multaichat-${stamp()}.json`, MC.storage.exportJson([app.state.conv], { presets: app.state.presets.userPresets() })) }, 'Export chat'),
-        h('button', { class: 'ghost small', onclick: async () => download(`multaichat-all-${stamp()}.json`, MC.storage.exportJson(await app.state.store.all(), { presets: app.state.presets.userPresets() })) }, 'Export all'),
+        h('button', { class: 'ghost small', dataset: { exportCurrent: '1' }, disabled: !app.state.conv, onclick: async () => download(`multaichat-${stamp()}.json`, await exportText([app.state.conv])) }, 'Export chat'),
+        h('button', { class: 'ghost small', onclick: async () => download(`multaichat-all-${stamp()}.json`, await exportText(await app.state.store.all())) }, 'Export all'),
         h('button', { class: 'ghost small', onclick: () => fileInput.click() }, 'Import'),
         fileInput));
   }

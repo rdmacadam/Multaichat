@@ -145,10 +145,10 @@
     return true;
   }
 
-  async function sendTurn(kind, inputs) {
+  async function sendTurn(kind, inputs, extra) {
     if (blockedByBusy()) return null;
     const conv = state.conv;
-    const turn = await state.runner.send(conv, kind, inputs);
+    const turn = await state.runner.send(conv, kind, inputs, extra);
     if (deleted.has(conv.id)) return turn;
     autoDerive(conv, turn);
     return turn;
@@ -163,6 +163,47 @@
     const p = sendTurn('broadcast', inputs);
     refresh();
     return p;
+  }
+
+  // Sends a message with attachments to every active lane (or one target lane).
+  // Resolves false (composer keeps its content) when cancelled or on errors.
+  async function sendWithAttachments(text, files, targetLaneId) {
+    if (blockedByBusy()) return false;
+    if (!cfg().selected.length && !state.conv) { toast('Pick at least one model first', 'warn'); openModelPicker(); return false; }
+    const check = MC.attach.validate(files);
+    if (!check.ok) { toast(check.error, 'warn'); return false; }
+    let read;
+    try { read = await Promise.all(files.map((f) => MC.files.read(f))); } catch (e) { toast(e.message, 'error'); return false; }
+    const conv = ensureConv();
+    const lanes = conv.lanes.filter((l) => l.active && (!targetLaneId || l.id === targetLaneId));
+    if (!lanes.length) { toast('All models were removed — add one first', 'warn'); return false; }
+    const refs = read.map((r) => r.ref);
+    const byId = Object.fromEntries(state.models.map((m) => [m.id, m]));
+    const incapableIds = refs.some((r) => r.kind === 'image') ? MC.attach.incapable(lanes, byId) : [];
+    let choice = null;
+    if (incapableIds.length) {
+      choice = conv.attachPolicy || null;
+      if (!choice) {
+        const names = lanes.filter((l) => incapableIds.includes(l.id)).map((l) => shortName(l.modelName));
+        const answer = await MC.ui.composer.askCapability(names);
+        if (!answer) return false;
+        choice = answer.choice;
+        if (answer.remember) conv.attachPolicy = choice;
+      }
+    }
+    try {
+      for (const r of read) await state.store.putAttachment(r.record);
+    } catch (e) {
+      toast('Could not save attachment: ' + e.message, 'error');
+      return false;
+    }
+    const textContents = Object.fromEntries(read.filter((r) => r.ref.kind === 'text').map((r) => [r.ref.name, r.text]));
+    const { inputs, delivery, skipped } = MC.attach.buildInputs({ text, refs, textContents, laneIds: lanes.map((l) => l.id), incapableIds, choice });
+    if (!Object.keys(inputs).length) { toast('None of the selected models can read images', 'warn'); return false; }
+    const p = sendTurn(targetLaneId ? 'targeted' : 'broadcast', inputs, { attachments: refs, delivery, skipped });
+    refresh();
+    p.catch(() => {});
+    return true;
   }
 
   function sendTargeted(laneId, text) { return sendTurn('targeted', { [laneId]: text }); }
@@ -202,7 +243,7 @@
   async function deleteConversation(id) {
     deleted.add(id);
     state.runner.stopConversation(id);
-    await state.store.delete(id);
+    await state.store.deleteConversation(id);
     if (state.conv && state.conv.id === id) state.conv = null;
     state.metas = await state.store.list();
     refresh();
@@ -219,6 +260,9 @@
   }
 
   async function importConversations(text) {
+    const data = MC.storage.parseImport(text);
+    for (const a of data.attachments) await state.store.putAttachment(a);
+    state.presets.importMany(data.presets);
     const existing = await state.store.all();
     const merged = MC.storage.importJson(text, existing);
     const before = new Map(existing.map((c) => [c.id, c.updatedAt]));
@@ -263,7 +307,12 @@
       onBlocked: () => toast('Updating saved chats — close other Multaichat tabs to continue', 'warn', 15000),
     });
     if (state.store.kind === 'local') toast('Browser database unavailable — history stored in limited local storage', 'warn', 8000);
-    state.runner = MC.runner.createRunner({ getKey: () => state.settings.getKey(), save, onChange });
+    state.runner = MC.runner.createRunner({
+      getKey: () => state.settings.getKey(), save, onChange,
+      loadAttachments: async (ids) => Object.fromEntries((await state.store.attachmentsFor(ids)).map((r) => [r.id, r.data])),
+      getModel: modelById,
+      getPdfMode: () => cfg().pdfMode,
+    });
     bindGlobalKeys();
     MC.ui.composer.mount();
     await refreshModels(false);
@@ -281,7 +330,7 @@
   MC.app = {
     state, start, refresh, modelById, refreshModels, openModelPicker, setSelection, addModel, removeModel,
     sendBroadcast, sendTargeted, sendBatch, openConversation, newChat, deleteConversation, renameConversation,
-    importConversations, forkAt, save, ensureConv, applyPreset, setChatSystemPrompt, promptHolder,
+    importConversations, forkAt, save, ensureConv, applyPreset, setChatSystemPrompt, promptHolder, sendWithAttachments,
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

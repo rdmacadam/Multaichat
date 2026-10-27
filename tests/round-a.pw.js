@@ -60,6 +60,22 @@ async function seedV1(page) {
     };
   }));
 }
+const PNG = { name: 'tiny.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') };
+const PDF = { name: 'doc.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.1\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 10 10]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n') };
+const LLAMA = 'meta-llama/llama-3.3-70b-instruct:free';
+const attachFiles = (page, files) => page.setInputFiles('#composer input.attach-input', files);
+async function pasteFile(page, f) {
+  await page.evaluate(({ name, type, b64 }) => {
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], name, { type }));
+    document.querySelector('#prompt').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+  }, { name: f.name, type: f.mimeType, b64: f.buffer.toString('base64') });
+}
+const useFourModels = (page) => page.evaluate((l) => MC.app.setSelection(['anthropic/claude-sonnet-5', 'openai/gpt-6', 'google/gemini-3-pro', l]), LLAMA);
+const reqFor = (page, model) => page.requests.filter((r) => r.model === model).pop();
+const lastUser = (req) => req.messages.filter((m) => m.role === 'user').pop();
+const laneCell = (page, turn, col) => page.locator('.turn').nth(turn).locator(`.cell[data-col="${col}"]`);
 const rowIds = (page) => page.$$eval('#picker-dialog .model-row', (rs) => rs.map((r) => r.dataset.id));
 
 const cases = {
@@ -217,6 +233,161 @@ const cases = {
     await page.waitForSelector('.conv');
     assert.equal(await page.locator('.conv').count(), 2);
     assert.equal(await page.evaluate(() => MC.app.state.store.kind), 'idb');
+  },
+
+  async 'attach image via button and pdf via paste'(page) {
+    await attachFiles(page, [PNG]);
+    await pasteFile(page, PDF);
+    assert.equal(await page.locator('#composer .att-chip').count(), 2);
+    await ask(page, 'What is this?');
+    await allDone(page, 1);
+    assert.equal(await page.locator('.turn .att-thumb').count(), 1);
+    assert.equal(await page.locator('.turn .att-file').count(), 1);
+    assert.equal(await page.locator('#composer .att-chip').count(), 0, 'chips cleared after send');
+    const claude = reqFor(page, 'anthropic/claude-sonnet-5');
+    const types = lastUser(claude).content.map((p) => p.type);
+    assert.deepEqual(types, ['text', 'image_url', 'file']);
+    assert.equal(claude.plugins[0].pdf.engine, 'native');
+    assert.equal(reqFor(page, 'openai/gpt-6').plugins[0].pdf.engine, 'pdf-text');
+  },
+
+  async 'capability dialog skip'(page) {
+    await useFourModels(page);
+    await attachFiles(page, [PNG]);
+    await ask(page, 'Describe');
+    await page.waitForSelector('#attach-dialog[open]');
+    assert.ok((await page.textContent('#attach-dialog')).includes('Llama 3.3 70B Instruct (free)'));
+    await page.click('#attach-dialog button:has-text("Skip them")');
+    await allDone(page, 1);
+    assert.ok((await laneCell(page, 0, 3).textContent()).includes("not sent: can't read images"));
+    assert.equal(page.requests.filter((r) => r.model === LLAMA).length, 0);
+    assert.equal(page.requests.length, 3);
+  },
+
+  async 'capability dialog text only'(page) {
+    await useFourModels(page);
+    await attachFiles(page, [PNG]);
+    await ask(page, 'Describe');
+    await page.click('#attach-dialog button:has-text("Send text only")');
+    await allDone(page, 1);
+    const llama = reqFor(page, LLAMA);
+    assert.equal(typeof lastUser(llama).content, 'string');
+    assert.ok(lastUser(llama).content.includes('[image omitted: tiny.png]'));
+    assert.equal(await laneCell(page, 0, 3).locator('.tag-text-only').count(), 1);
+    assert.equal(await page.locator('.turn .prompt-label').first().textContent(), 'You → all');
+  },
+
+  async 'remember for this chat'(page) {
+    await useFourModels(page);
+    await attachFiles(page, [PNG]);
+    await ask(page, 'One');
+    await page.check('#attach-dialog input[type=checkbox]');
+    await page.click('#attach-dialog button:has-text("Skip them")');
+    await allDone(page, 1);
+    await attachFiles(page, [PNG]);
+    await ask(page, 'Two');
+    await allDone(page, 2);
+    assert.equal(await page.locator('#attach-dialog[open]').count(), 0);
+    assert.ok((await laneCell(page, 1, 3).textContent()).includes("not sent: can't read images"));
+  },
+
+  async 'cancel keeps composer'(page) {
+    await useFourModels(page);
+    await attachFiles(page, [PNG]);
+    await page.fill('#prompt', 'Keep me');
+    await page.press('#prompt', 'Enter');
+    await page.click('#attach-dialog button:has-text("Cancel")');
+    await page.waitForTimeout(300);
+    assert.equal(page.requests.length, 0);
+    assert.equal(await page.inputValue('#prompt'), 'Keep me');
+    assert.equal(await page.locator('#composer .att-chip').count(), 1);
+  },
+
+  async 'text file inlined'(page) {
+    await attachFiles(page, [{ name: 'notes.md', mimeType: 'text/markdown', buffer: Buffer.from('# Notes\nhello') }]);
+    await ask(page, 'Summarize');
+    await allDone(page, 1);
+    assert.equal(page.requests.length, 3);
+    for (const r of page.requests) {
+      const c = lastUser(r).content;
+      assert.equal(typeof c, 'string');
+      assert.ok(c.includes('--- file: notes.md ---\n# Notes\nhello\n--- end of notes.md ---'));
+    }
+    assert.equal(await page.locator('.turn .att-file').count(), 1);
+  },
+
+  async 'attachments survive reload'(page) {
+    await attachFiles(page, [PNG]);
+    await ask(page, 'Look');
+    await allDone(page, 1);
+    await page.reload();
+    await page.waitForSelector('.turn .att-thumb img[src^="blob:"]');
+    const before = page.requests.length;
+    await laneCell(page, 0, 0).locator('button:has-text("Retry")').click();
+    await page.waitForFunction((n) => !document.querySelector('.cell.status-streaming'), before);
+    const again = page.requests[page.requests.length - 1];
+    assert.ok(page.requests.length > before);
+    assert.equal(lastUser(again).content[1].type, 'image_url');
+  },
+
+  async 'downscales large image'(page) {
+    await page.evaluate(async () => {
+      const c = new OffscreenCanvas(6000, 4000);
+      const g = c.getContext('2d'); g.fillStyle = '#3a6'; g.fillRect(0, 0, 6000, 4000);
+      const blob = await c.convertToBlob({ type: 'image/png' });
+      const dt = new DataTransfer();
+      dt.items.add(new File([blob], 'huge.png', { type: 'image/png' }));
+      document.querySelector('#prompt').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+    });
+    await page.waitForSelector('#composer .att-chip');
+    await ask(page, 'Big');
+    await allDone(page, 1);
+    const url = lastUser(reqFor(page, 'anthropic/claude-sonnet-5')).content[1].image_url.url;
+    const size = await page.evaluate(async (u) => { const b = await createImageBitmap(await (await fetch(u)).blob()); return [b.width, b.height]; }, url);
+    assert.ok(Math.max(...size) <= 2048 && Math.max(...size) >= 2000, 'downscaled to 2048: ' + size);
+  },
+
+  async 'attachment save failure keeps composer'(page) {
+    await page.evaluate(() => { MC.app.state.store.putAttachment = async () => { throw new Error('QuotaExceededError'); }; });
+    await attachFiles(page, [PNG]);
+    await page.fill('#prompt', 'Keep me');
+    await page.press('#prompt', 'Enter');
+    await page.waitForSelector('.toast:has-text("Could not save attachment")');
+    assert.equal(page.requests.length, 0);
+    assert.equal(await page.inputValue('#prompt'), 'Keep me');
+    assert.equal(await page.locator('#composer .att-chip').count(), 1);
+  },
+
+  async 'ocr setting'(page) {
+    await page.click('button[aria-label=Settings]');
+    await page.selectOption('#settings-dialog select[name=pdfMode]', 'ocr');
+    await page.click('#settings-dialog button[type=submit]');
+    await attachFiles(page, [PDF]);
+    await ask(page, 'Read');
+    await allDone(page, 1);
+    assert.equal(reqFor(page, 'openai/gpt-6').plugins[0].pdf.engine, 'mistral-ocr');
+    assert.equal(reqFor(page, 'anthropic/claude-sonnet-5').plugins[0].pdf.engine, 'native');
+  },
+
+  async 'export includes attachments and import restores them'(page) {
+    page.on('dialog', (d) => d.accept());
+    await attachFiles(page, [PNG]);
+    await ask(page, 'Keep');
+    await allDone(page, 1);
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Export all")')]);
+    const file = await dl.path();
+    const json = JSON.parse(require('fs').readFileSync(file, 'utf8'));
+    assert.equal(json.attachments.length, 1);
+    assert.ok(json.attachments[0].data.startsWith('data:image/png'));
+    const attId = await page.evaluate(() => MC.app.state.conv.turns[0].attachments[0].id);
+    await page.hover('.conv');
+    await page.click('.conv button[title="Delete"]');
+    await page.waitForFunction(() => !document.querySelector('.conv'));
+    assert.equal(await page.evaluate(async (id) => (await MC.app.state.store.getAttachment(id)) || null, attId), null, 'attachment deleted with chat');
+    await page.setInputFiles('#sidebar input[type=file]', file);
+    await page.waitForSelector('.conv');
+    await page.click('.conv-open');
+    await page.waitForSelector('.turn .att-thumb img[src^="blob:"]');
   },
 };
 
