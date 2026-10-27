@@ -326,8 +326,7 @@
       if (!choice) return false;
       if (choice.action === 'selection') {
         if (files.length) return sendWithAttachments(text, files);
-        sendBroadcast(text);
-        return true;
+        return !!sendBroadcast(text);
       }
       picks = choice.picks;
       const pOf = new Map(route.picks.map((x) => [x.modelId, x.p]));
