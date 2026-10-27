@@ -12,7 +12,9 @@
    },
    "architecture": {
     "input_modalities": [
-     "text"
+     "text",
+     "image",
+     "file"
     ],
     "output_modalities": [
      "text"
@@ -69,7 +71,8 @@
    },
    "architecture": {
     "input_modalities": [
-     "text"
+     "text",
+     "image"
     ],
     "output_modalities": [
      "text"
@@ -183,7 +186,9 @@
    },
    "architecture": {
     "input_modalities": [
-     "text"
+     "text",
+     "image",
+     "file"
     ],
     "output_modalities": [
      "text"
@@ -373,7 +378,8 @@
    },
    "architecture": {
     "input_modalities": [
-     "text"
+     "text",
+     "image"
     ],
     "output_modalities": [
      "text"

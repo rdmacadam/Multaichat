@@ -46,6 +46,8 @@
         const priceIn = pricePerM(r.pricing && r.pricing.prompt);
         const priceOut = pricePerM(r.pricing && r.pricing.completion);
         const created = (r.created || 0) * 1000;
+        const ins = r.architecture && Array.isArray(r.architecture.input_modalities) && r.architecture.input_modalities.length
+          ? r.architecture.input_modalities.slice() : ['text'];
         return {
           id: r.id,
           name: r.name || r.id,
@@ -56,6 +58,9 @@
           priceOut,
           free: /:free$/.test(r.id) || (priceIn === 0 && priceOut === 0),
           open: isOpen(r, provider),
+          inputs: ins,
+          images: ins.includes('image'),
+          files: ins.includes('file'),
           isNew(now = Date.now()) { return created > 0 && now - created <= 30 * DAY; },
         };
       });
@@ -109,10 +114,23 @@
     return list.sort(newestFirst);
   }
 
-  function filter(models, { freeOnly, openOnly, maxPrice } = {}) {
+  const isSet = (v) => v != null && v !== '' && v !== false;
+
+  // Picker filters. Unset fields (null, '', false) do not filter. maxPrice is
+  // the v1 name for maxOut. A price limit excludes models with unknown price.
+  function filter(models, { freeOnly, openOnly, maxPrice, maxIn, maxOut, minContext, images, files } = {}) {
+    if (!isSet(maxOut)) maxOut = maxPrice;
     return models.filter((m) =>
       (!freeOnly || m.free) && (!openOnly || m.open) &&
-      (maxPrice == null || maxPrice === '' || (m.priceOut != null && m.priceOut <= Number(maxPrice))));
+      (!isSet(maxIn) || (m.priceIn != null && m.priceIn <= Number(maxIn))) &&
+      (!isSet(maxOut) || (m.priceOut != null && m.priceOut <= Number(maxOut))) &&
+      (!isSet(minContext) || m.context >= Number(minContext)) &&
+      (!images || m.images) && (!files || m.files));
+  }
+
+  function activeFilterCount(f) {
+    if (!f) return 0;
+    return ['maxIn', 'maxOut', 'minContext', 'images', 'files'].filter((k) => isSet(f[k])).length;
   }
 
   async function loadCached({ ls = globalThis.localStorage, fetchModelsFn, now = Date.now(), force = false } = {}) {
@@ -159,5 +177,5 @@
     };
   }
 
-  return { FLAGSHIP, OPEN_PROVIDERS, FALLBACK_RAW, normalize, sections, search, sortBy, filter, loadCached, reconcileSelection };
+  return { FLAGSHIP, OPEN_PROVIDERS, FALLBACK_RAW, normalize, sections, search, sortBy, filter, activeFilterCount, loadCached, reconcileSelection };
 });

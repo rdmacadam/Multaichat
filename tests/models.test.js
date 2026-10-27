@@ -165,3 +165,37 @@ test('reconcileSelection fills empty selection with first 3 top picks', () => {
   assert.deepEqual(r.settings.selected, ['anthropic/claude-sonnet-5', 'openai/gpt-6', 'google/gemini-3-pro']);
   assert.deepEqual(r.dropped, []);
 });
+
+test('normalize exposes input capabilities', () => {
+  const by = (id) => all.find((m) => m.id === id);
+  assert.equal(by('anthropic/claude-sonnet-5').images, true);
+  assert.equal(by('anthropic/claude-sonnet-5').files, true);
+  assert.equal(by('openai/gpt-6').images, true);
+  assert.equal(by('openai/gpt-6').files, false);
+  assert.deepEqual(by('deepseek/deepseek-v4').inputs, ['text']);
+});
+
+test('filter maxIn/maxOut', () => {
+  const withNull = all.concat([Object.assign({}, all[0], { id: 'x/null', priceIn: null, priceOut: null })]);
+  const r = M.filter(withNull, { maxIn: 1 });
+  assert.ok(r.length > 0 && r.every((m) => m.priceIn != null && m.priceIn <= 1));
+  assert.ok(M.filter(withNull, { maxOut: '2' }).every((m) => m.priceOut != null && m.priceOut <= 2));
+  assert.deepEqual(ids(M.filter(all, { maxPrice: 2 })), ids(M.filter(all, { maxOut: 2 })));
+  assert.equal(M.filter(withNull, { maxIn: '' }).length, withNull.length);
+});
+
+test('filter minContext', () => {
+  const r = M.filter(all, { minContext: 200000 });
+  assert.ok(r.length > 0 && r.every((m) => m.context >= 200000));
+  assert.equal(M.filter(all, { minContext: '200000' }).length, r.length);
+});
+
+test('filter images/files', () => {
+  assert.deepEqual(ids(M.filter(all, { images: true })).sort(), ['anthropic/claude-sonnet-5', 'google/gemini-3-pro', 'meta-llama/llama-5-405b', 'openai/gpt-6']);
+  assert.deepEqual(ids(M.filter(all, { files: true })).sort(), ['anthropic/claude-sonnet-5', 'google/gemini-3-pro']);
+});
+
+test('activeFilterCount', () => {
+  assert.equal(M.activeFilterCount({ maxIn: 1, images: true, files: false, minContext: '' }), 2);
+  assert.equal(M.activeFilterCount(undefined), 0);
+});
