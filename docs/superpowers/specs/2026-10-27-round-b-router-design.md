@@ -86,8 +86,9 @@ dependencies, works from `file://` and GitHub Pages under `/Multaichat/`.
 ### Calling them
 
 - `MC.api.decide({ key, model, state, questions, signal })` →
-  `POST https://openrouter.ai/api/v1/systemone`; on HTTP 404 it retries once at
-  `POST https://openrouter.ai/api/alpha/decisions` (same wire format). Headers
+  `POST https://openrouter.ai/api/alpha/decisions` (the documented endpoint);
+  on HTTP 404 it retries once at `POST https://openrouter.ai/api/v1/systemone`
+  (same wire format). Headers
   as for chat (`Authorization`, `X-Title`, `HTTP-Referer` when served over
   http(s)). CORS allows browser calls (verified by preflight).
 - Body: `{ model, state, questions }`. `state` is an array of strings and
@@ -452,7 +453,7 @@ turns (deep clone, as today).
   - `cost.summary`: all parts, previous versions, replaced, unknown, free = 0,
     old chats without new fields.
   - `normalizeDeciders`, `loadDeciders` cache/fallback, `router` flag.
-  - `api.decide`: body, systemone → alpha fallback on 404, errors;
+  - `api.decide`: body, alpha → systemone fallback on 404, errors;
     `streamChat` `servedModel` and `extraBody`.
 - **Browser (`tests/round-b.pw.js`, mocked OpenRouter including the
   decisions endpoint and the decisions model list):**
