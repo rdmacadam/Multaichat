@@ -116,6 +116,16 @@ test('candidates manual uses manualPool in order', () => {
   assert.equal(f.reason, 'filters');
 });
 
+test('candidates dedupes selection and manualPool ids, first occurrence first', () => {
+  const man = cand({ mode: 'manual', manualPool: ['deepseek/deepseek-v3', 'qwen/qwen4-coder', 'deepseek/deepseek-v3'] });
+  assert.deepEqual(ids(man.list), ['deepseek/deepseek-v3', 'qwen/qwen4-coder']);
+  assert.equal(man.reason, null);
+  const sel = cand({ pool: 'selection', selection: ['x-ai/grok-5', 'openai/gpt-6', 'x-ai/grok-5'] });
+  assert.equal(ids(sel.list).length, 2);
+  assert.deepEqual(ids(sel.list).sort(), ['openai/gpt-6', 'x-ai/grok-5']);
+  assert.equal(sel.reason, null);
+});
+
 test('candidates are in rule order for the mode', () => {
   const r = cand({ mode: 'best' });
   assert.deepEqual(ids(r.list), ids(Router.rulesPick(r.list, 'best', r.list.length)));
@@ -184,6 +194,23 @@ test('chooseDecider free mode with allowPaidInFree appends paid', () => {
     allowPaidInFree: true })), ['other/free-decide', 'perplexity/pplx-decider-v1.2']);
 });
 
+test('chooseDecider free mode keeps free deciders before paid ones even with images', () => {
+  const ds = [decider('baseten/mammoth-1:free', { priceIn: 0 }), decider('baseten/elephant-1:free', { priceIn: 0 }),
+    decider('liquid/d1-ultra', { images: true }), decider('typesafe/jev-1.14', { images: true })];
+  const got = ids(Router.chooseDecider(ds, { mode: 'free', decisionModel: 'liquid/d1-ultra',
+    starred: ['liquid/d1-ultra', 'typesafe/jev-1.14', 'baseten/elephant-1:free'], allowPaidInFree: true, hasImages: true }));
+  assert.deepEqual(got, ['baseten/mammoth-1:free', 'baseten/elephant-1:free']);
+  // images-first applies within the free group
+  const mixed = ds.concat([decider('vis/free-eye:free', { priceIn: 0, images: true })]);
+  assert.deepEqual(ids(Router.chooseDecider(mixed, { mode: 'free', decisionModel: Router.DEFAULT_DECIDER, starred: [],
+    allowPaidInFree: true, hasImages: true })), ['vis/free-eye:free', 'baseten/mammoth-1:free']);
+  // and within the paid group
+  const onePaidText = [decider('baseten/mammoth-1:free', { priceIn: 0 }), decider('inception/mercury-decide'),
+    decider('liquid/d1-ultra', { images: true })];
+  assert.deepEqual(ids(Router.chooseDecider(onePaidText.slice(1), { mode: 'free', decisionModel: 'inception/mercury-decide',
+    starred: ['liquid/d1-ultra'], allowPaidInFree: true, hasImages: true })), ['liquid/d1-ultra', 'inception/mercury-decide']);
+});
+
 test('chooseDecider puts image deciders first when images are attached', () => {
   assert.deepEqual(chain({ hasImages: true }), ['liquid/d1-ultra', 'typesafe/jev-1.14']);
   assert.deepEqual(chain({ hasImages: true, starred: ['inception/mercury-decide'] }),
@@ -229,9 +256,29 @@ test('decisionRequest state: message, system prompt, context note, PDF notes', (
   assert.deepEqual(req({ text: 'Q?' }).state, ['User message:\nQ?']);
   const r = req({ text: 'Q?', systemPrompt: 'Be brief.', contextNote: 'We talked about cats.',
     attachments: [{ id: 'p1', kind: 'pdf', name: 'report.pdf', mime: 'application/pdf', size: 10 },
-      { id: 't1', kind: 'text', name: 'notes.txt', mime: 'text/plain', size: 10 }] });
+      { id: 't1', kind: 'text', name: 'notes.txt', mime: 'text/plain', size: 10 }],
+    textContents: { t1: 'Buy milk.\nCall Bob.' } });
   assert.deepEqual(r.state, ['User message:\nQ?', 'System prompt:\nBe brief.', 'Earlier in this chat:\nWe talked about cats.',
-    '[PDF attached: report.pdf]']);
+    '[PDF attached: report.pdf]', 'notes.txt:\nBuy milk.\nCall Bob.']);
+  // only the first 2000 chars of a text file; files without contents are skipped
+  const long = req({ text: 'Q?', attachments: [{ id: 't1', kind: 'text', name: 'a.txt' }, { id: 't2', kind: 'text', name: 'b.txt' }],
+    textContents: { t1: 'y'.repeat(5000) } });
+  assert.deepEqual(long.state, ['User message:\nQ?', 'a.txt:\n' + 'y'.repeat(2000)]);
+});
+
+test('decisionRequest cuts text file excerpts before the message', () => {
+  const d = { id: 'baseten/mammoth-1:free', context: 16384, images: false };
+  const files = Array.from({ length: 12 }, (_, i) => ({ id: 'f' + i, kind: 'text', name: `f${i}.txt` }));
+  const textContents = Object.fromEntries(files.map((f) => [f.id, 'z'.repeat(5000)]));
+  const r = Router.decisionRequest({ mode: 'auto', candidates: models.slice(0, 5), decider: d, text: 'm'.repeat(3000),
+    systemPrompt: 's'.repeat(3000), contextNote: 'n'.repeat(3000), attachments: files, images: {}, textContents });
+  assert.ok(JSON.stringify(r.state).length / 4 <= Math.floor(16384 * 0.6) * 0.4);
+  assert.equal(r.state[0], 'User message:\n' + 'm'.repeat(3000));
+  assert.equal(r.state[1], 'System prompt:\n');
+  assert.equal(r.state[2], 'Earlier in this chat:\n');
+  const excerpts = r.state.slice(3);
+  assert.equal(excerpts.length, 12);
+  assert.ok(excerpts.every((p, i) => p.startsWith(`f${i}.txt:\nz`) && p.length < 'f0.txt:\n'.length + 2000));
 });
 
 test('decisionRequest sends images only to image deciders with allowed types', () => {
@@ -262,6 +309,20 @@ test('decisionRequest sends images only to image deciders with allowed types', (
   // no image data → note, not a part
   const missing = req({ attachments: [att('a', 'image/png')], images: {}, decider: decider('liquid/d1-ultra', { images: true }) });
   assert.deepEqual(missing.state, ['User message:\nhi', '[1 image(s) attached]']);
+});
+
+test('decisionRequest images use at most half of the state budget; the message stays', () => {
+  const att = (id) => ({ id, kind: 'image', name: id, mime: 'image/png', size: 1 });
+  const atts = ['a', 'b', 'c', 'd'].map(att);
+  const images = Object.fromEntries(atts.map((a) => [a.id, 'data:image/png;base64,' + a.id]));
+  const small = { id: 'liquid/d1-small', context: 16384, images: true };
+  const r = Router.decisionRequest({ mode: 'auto', candidates: models.slice(0, 5), decider: small, text: 'q'.repeat(20000),
+    attachments: atts, images });
+  const maxState = Math.floor(16384 * 0.6) * 4 * 0.4;
+  const imgs = r.state.filter((p) => typeof p === 'object');
+  assert.ok(imgs.length >= 1 && imgs.length * 4000 <= maxState / 2);
+  assert.ok(r.state.includes(`[${4 - imgs.length} image(s) attached]`));
+  assert.ok(r.state[0].startsWith('User message:\nqqq'));
 });
 
 test('decisionRequest cuts long state to budget', () => {

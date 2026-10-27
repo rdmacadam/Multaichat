@@ -19,6 +19,7 @@
   const BUDGET_SHARE = 0.6;   // share of the decider's context we may use
   const STATE_SHARE = 0.4;    // share of that budget the state may use
   const SHORT_DESC = 60;
+  const TEXT_EXCERPT = 2000;
   const IMAGE_CHARS = 4000;   // rough size of one image part (~1k tokens); data URLs are not text
   const IMAGE_MIME = ['image/png', 'image/jpeg', 'image/webp'];
   const TYPESAFE_MIME = ['image/png', 'image/jpeg'];
@@ -133,7 +134,7 @@
       return !list.length;
     };
     if (mode === 'manual' || pool === 'selection') {
-      const wanted = (mode === 'manual' ? manualPool : selection) || [];
+      const wanted = [...new Set((mode === 'manual' ? manualPool : selection) || [])];
       const byId = new Map(models.map((m) => [m.id, m]));
       list = wanted.map((id) => byId.get(id)).filter(Boolean);
       if (!list.length || list.length < wanted.length) reason = 'selection';
@@ -155,16 +156,21 @@
     const byId = new Map((deciders || []).map((d) => [d.id, d]));
     const chosen = decisionModel || DEFAULT_DECIDER;
     const star = (starred || []).filter((id) => byId.has(id));
-    let ids;
+    const seen = new Set();
+    // Present, not yet listed; image deciders first when images are attached.
+    const group = (ids) => {
+      const list = ids.filter((id) => byId.has(id) && !seen.has(id) && seen.add(id)).map((id) => byId.get(id));
+      return hasImages ? list.filter((d) => d.images).concat(list.filter((d) => !d.images)) : list;
+    };
+    let list;
     if (mode === 'free') {
+      // Free deciders always come before paid ones, even with images attached.
       const isFree = (id) => byId.has(id) && byId.get(id).free;
-      ids = [chosen, FREE_DECIDER].concat(star, (deciders || []).map((d) => d.id)).filter(isFree);
-      if (allowPaidInFree) ids = ids.concat([chosen], star);
+      list = group([chosen, FREE_DECIDER].concat(star, (deciders || []).map((d) => d.id)).filter(isFree));
+      if (allowPaidInFree) list = list.concat(group([chosen].concat(star)));
     } else {
-      ids = [chosen].concat(star);
+      list = group([chosen].concat(star));
     }
-    let list = [...new Set(ids)].filter((id) => byId.has(id)).map((id) => byId.get(id));
-    if (hasImages) list = list.filter((d) => d.images).concat(list.filter((d) => !d.images));
     return list.slice(0, MAX_DECIDERS);
   }
 
@@ -245,7 +251,12 @@
     return (/^typesafe\//.test(decider.id || '') ? TYPESAFE_MIME : IMAGE_MIME).includes(mime);
   }
 
-  function decisionRequest({ mode, candidates: list, decider, text, systemPrompt, contextNote, attachments, images }) {
+  // textContents: { attachmentId: text } as for MC.attach.buildInputs; text is
+  // the composer's own text (without the inlined file bodies).
+  function decisionRequest({ mode, candidates: list, decider, text, systemPrompt, contextNote, attachments, images, textContents }) {
+    const maxState = Math.floor(budgetChars(decider) * STATE_SHARE);
+    // images may use at most half of the state's share, so the message stays
+    const maxImages = Math.min(MAX_IMAGES, Math.floor(maxState / 2 / IMAGE_CHARS));
     const parts = [{ head: 'User message:\n', body: String(text || '') }];
     if (systemPrompt) parts.push({ head: 'System prompt:\n', body: String(systemPrompt) });
     if (contextNote) parts.push({ head: 'Earlier in this chat:\n', body: String(contextNote) });
@@ -254,18 +265,23 @@
     let unsent = 0;
     for (const a of atts.filter((x) => x && x.kind === 'image')) {
       const url = images && images[a.id];
-      if (decider.images && url && imageAllowed(decider, a.mime) && sent.length < MAX_IMAGES) {
+      if (decider.images && url && imageAllowed(decider, a.mime) && sent.length < maxImages) {
         sent.push({ type: 'image_url', image_url: { url } });
       } else unsent++;
     }
     parts.push(...sent);
     if (unsent) parts.push(`[${unsent} image(s) attached]`);
-    for (const a of atts) if (a && a.kind === 'pdf') parts.push(`[PDF attached: ${a.name}]`);
+    const files = [];
+    for (const a of atts) {
+      if (a && a.kind === 'pdf') parts.push(`[PDF attached: ${a.name}]`);
+      const body = a && a.kind === 'text' && textContents && textContents[a.id];
+      if (typeof body === 'string') files.push(parts.push({ head: `${a.name}:\n`, body: body.slice(0, TEXT_EXCERPT) }) - 1);
+    }
 
+    // cut order: context note, system prompt, text files, message last
     const note = parts.findIndex((p) => p.head === 'Earlier in this chat:\n');
     const sp = parts.findIndex((p) => p.head === 'System prompt:\n');
-    const groups = [[note], [sp], [0]].filter((g) => g[0] >= 0);
-    const maxState = Math.floor(budgetChars(decider) * STATE_SHARE);
+    const groups = [[note], [sp], files, [0]].filter((g) => g.length && g[0] >= 0);
     const state = cutToFit(parts, maxState, groups);
     const fit = fitToContext(list, decider, stateChars(state), mode);
     return { state, questions: questionsFor(fit, mode), candidateIds: fit.map((m) => m.id) };
