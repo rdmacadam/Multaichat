@@ -469,6 +469,51 @@ const cases = {
     assert.equal(await page.locator('.turn').count(), 0);
   },
 
+  async 'very best with judge marks the best answer and the counter includes the judge'(page) {
+    await ask(page, 'Which is best?');
+    await allDone(page, 1);
+    await page.waitForSelector('.cell .badge.best');
+    assert.equal(await page.locator('.badge.best').count(), 1);
+    assert.match(await page.textContent('.badge.best'), /^🏆 best \(70 %\)$/);
+    assert.equal(await page.locator('.cell:has(.badge.best) .cell-head .badge.best').count(), 1);
+    assert.equal(page.decisions.length, 2, 'one pick decision and one judge decision');
+    const judge = page.decisions[1];
+    assert.deepEqual(Object.keys(judge.questions), ['best']);
+    const j = await page.evaluate(() => MC.app.state.conv.turns[0].judge);
+    assert.equal(j.status, 'done');
+    // the counter includes the judge
+    await page.focus('.cost-wrap .info');
+    await page.waitForFunction(() => /Judge: /.test(document.querySelector('.cost-wrap .tip').textContent));
+    // Judge again replaces the verdict and moves the old cost to spentReplaced
+    const again = page.locator('.route-bar button', { hasText: 'Judge again' });
+    await again.waitFor();
+    assert.equal(await again.isDisabled(), false);
+    await again.click();
+    await page.waitForFunction(() => MC.app.state.conv.turns[0].judge.createdAt !== undefined && MC.app.state.conv.turns[0].spentReplaced && MC.app.state.conv.turns[0].spentReplaced.judge > 0);
+    await page.waitForFunction(() => MC.app.state.conv.turns[0].judge.status === 'done');
+    assert.equal(page.decisions.length, 3);
+    assert.equal(await page.locator('.badge.best').count(), 1);
+  },
+
+  async 'very best with fuse renders a Fusion'(page) {
+    await ask(page, 'Merge please');
+    await allDone(page, 1);
+    await page.waitForSelector('.derived-card.fusion .topic');
+    assert.equal(await page.locator('.badge.best').count(), 0, 'no judge, no badge');
+    assert.equal(await page.locator('.route-bar button', { hasText: 'Judge again' }).count(), 0);
+    // exactly one Fusion request (json_object response format)
+    assert.equal(page.requests.filter((r) => r.response_format).length, 1);
+  },
+
+  async 'auto Fusion and the fuse extra run Fusion once'(page) {
+    await ask(page, 'Once only');
+    await allDone(page, 1);
+    await page.waitForSelector('.derived-card.fusion .topic');
+    await page.waitForTimeout(500);
+    assert.equal(page.requests.filter((r) => r.response_format).length, 1);
+  },
+
+
 };
 cases['starred deciders missing from the catalog are greyed'].opts = { noDeciders: true };
 cases['auto mode routes to the top N and shows the route bar'].init = routerInit({ mode: 'auto', count: 2, pool: 'catalog' });
@@ -485,6 +530,9 @@ cases['native mode sends openrouter/auto with allowed_models and session_id; sho
 cases['targeted reply bypasses the router'].init = routerInit({ mode: 'auto', count: 2 });
 cases['Stop while routing sends nothing and keeps the text'].init = routerInit({ mode: 'auto', count: 2 });
 cases['Stop while routing sends nothing and keeps the text'].opts = { decideDelay: 2000 };
+cases['very best with judge marks the best answer and the counter includes the judge'].init = routerInit({ mode: 'best', count: 3, extras: { judge: true } });
+cases['very best with fuse renders a Fusion'].init = routerInit({ mode: 'best', count: 3, extras: { fusion: true } });
+cases['auto Fusion and the fuse extra run Fusion once'].init = routerInit({ mode: 'best', count: 3, extras: { fusion: true } }, { autoFusion: true });
 
 (async () => {
   const browser = await chromium.launch();

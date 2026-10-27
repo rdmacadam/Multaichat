@@ -347,11 +347,38 @@
   function sendTargeted(laneId, text) { return sendTurn('targeted', { [laneId]: text }); }
   function sendBatch(inputs) { return sendTurn('clarify-batch', inputs); }
 
+  // Very best answer extras (judge, Fusion) for a routed "best" turn.
+  async function runExtras(conv, turn, skipFusion) {
+    const c = cfg();
+    const r = MC.router.withDefaults(c.router);
+    if (!turn.route || turn.route.mode !== 'best') return;
+    if (MC.conv.answeredLanes(turn).length < 2) return;
+    const jobs = [];
+    if (r.extras.fusion && !skipFusion && c.fusionModel) jobs.push(state.runner.runFusion(conv, turn.id, c.fusionModel));
+    if (r.extras.judge) {
+      jobs.push(judgeTurn(conv, turn));
+    }
+    await Promise.all(jobs);
+  }
+
+  function judgeTurn(conv, turn) {
+    return state.runner.runJudge(conv, turn.id, judgeChain());
+  }
+
+  function judgeChain() {
+    const c = cfg();
+    const r = MC.router.withDefaults(c.router);
+    return MC.router.chooseDecider(state.deciders, {
+      mode: 'best', decisionModel: r.decisionModel, starred: c.starredDeciders, allowPaidInFree: r.allowPaidInFree, hasImages: false });
+  }
+
   async function autoDerive(conv, turn) {
     const c = cfg();
     const answered = MC.conv.answeredLanes(turn).length;
+    const fusionAuto = !!(c.autoFusion && answered >= 2 && c.fusionModel);
+    await runExtras(conv, turn, fusionAuto);
     if (c.autoTldr && answered >= 1 && c.summaryModel) await state.runner.runTldr(conv, turn.id, c.summaryModel);
-    if (c.autoFusion && answered >= 2 && c.fusionModel) await state.runner.runFusion(conv, turn.id, c.fusionModel);
+    if (fusionAuto) await state.runner.runFusion(conv, turn.id, c.fusionModel);
   }
 
   async function openConversation(id) {
@@ -472,7 +499,7 @@
     state, start, refresh, modelById, refreshModels, refreshDeciders, openModelPicker, setSelection, addModel, removeModel,
     sendBroadcast, sendTargeted, sendBatch, openConversation, newChat, deleteConversation, renameConversation,
     importConversations, forkAt, save, ensureConv, applyPreset, setChatSystemPrompt, promptHolder, sendWithAttachments, updateCost,
-    sendRouted, abortRoute, isRouting, currentModelIds,
+    sendRouted, judgeTurn, abortRoute, isRouting, currentModelIds,
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

@@ -63,6 +63,16 @@ Plain HTML/CSS/JavaScript with no build step and no dependencies. It runs entire
 | `Ctrl/⌘+Enter` | Send in the "Answer them together" panel |
 
 ## Notes
+- **Router.** Instead of picking models yourself, turn on 🧭 in the toolbar and let a decision model choose which models answer each message.
+  - **Modes:** *Full auto* (the top picks), *Diverse* (different providers), *Best free* (free models only), *Very best answer* (see extras below), *Manual* (you choose the number; nothing is decided for you) and *OpenRouter Auto* (OpenRouter's own router, which answers with one model).
+  - **Pool:** pick from the whole catalog or only from the models in your toolbar. The picker filters (price, context, images, files) also apply, and a message with images never goes to a model that can't read them.
+  - **Count:** how many models answer (1 to 8; OpenRouter Auto always uses 1).
+  - **Decision models and stars:** the decision models come live from OpenRouter. Star the ones you like; the router uses your default (or the first starred one) and tries one more starred model if it fails, then falls back to simple rules.
+  - **Preview:** optionally see the picks before sending, remove some, or send to your own selection instead.
+  - **Very best answer extras:** after the answers finish, *Fuse the answers* runs a Fusion, and *Judge* asks a decision model which answer is best. The winner shows 🏆 best (with its probability); **Judge again** in the route bar asks anew.
+  - **Costs of decisions:** each decision is a small paid request (free ones cost nothing). Its cost is shown in the route bar and counted in the chat total.
+  - Every turn shows a route bar above the answers: the mode, decision model, task, cost, time and each pick's probability, plus the candidates that were considered.
+- **Σ cost counter.** The top bar shows what the current chat has cost so far, including router decisions, TL;DR, Fusion and the judge. Hover or tap it for the breakdown. A leading ≥ means some requests had no price from OpenRouter.
 
 - Free models are rate-limited by OpenRouter. When one hits the limit, its column offers **Use paid variant** if a paid version of that model exists.
 - Fusion asks the model for JSON output. Models that can't produce it show their raw reply with a *Regenerate* option.
@@ -72,7 +82,7 @@ Plain HTML/CSS/JavaScript with no build step and no dependencies. It runs entire
 ```
 npm run check    # production check: assets/paths for GitHub Pages, page loads under /Multaichat/ and from file://, all suites
 npm test         # unit tests for js/core and the markdown renderer (Node 22+, no deps)
-npm run smoke    # Playwright browser tests (flow, regressions, Round A features) against a mocked OpenRouter
+npm run smoke    # Playwright browser tests (flow, regressions, Round A features, and `tests/round-b.pw.js` for the cost counter and router) against a mocked OpenRouter
 ```
 
 Code layout: `js/core/*` holds the logic and has no page-handling code, so it is unit-tested in Node. `js/ui/*` builds the page. `js/app.js` connects the two. Scripts are loaded as plain `<script>` tags rather than ES modules, so the app also works when opened from disk.

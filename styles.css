@@ -318,3 +318,6 @@ dialog::backdrop { background: rgba(0,0,0,.35); }
 .route-preview .pick-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .route-preview .pick-add { max-width: 100%; }
 .route-preview .dialog-foot { flex-wrap: wrap; }
+.route-judge-error { color: var(--danger); }
+.badge.best { color: var(--ok); border-color: currentColor; background: transparent; font-weight: 600; margin-left: 6px; }
+.route-line .judge-again { margin-left: 8px; }

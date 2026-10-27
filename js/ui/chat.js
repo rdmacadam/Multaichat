@@ -140,6 +140,7 @@
     const runner = app().state.runner;
     const uniqueInputs = new Set(mainInputs(turn)).size;
     const textOnly = turn.delivery && turn.delivery[lane.id] === 'text';
+    const best = !!(turn.judge && turn.judge.status === 'done' && turn.judge.laneId === lane.id && turn.judge.p != null);
     const actions = [];
     if (r.status === 'streaming') actions.push(h('button', { class: 'ghost small', onclick: () => runner.stop(turn.id, lane.id) }, '■ Stop'));
     else {
@@ -151,7 +152,8 @@
     const paid = r.status === 'error' && r.errorStatus === 429 ? paidVariant(lane) : null;
     return h('div', base,
       h('div', { class: 'cell-head' }, h('span', { class: 'cell-model' }, shortName(lane.modelName),
-        textOnly ? h('span', { class: 'badge tag-text-only', title: 'Attachments were left out for this model' }, 'text only') : null), statusLine(r)),
+        textOnly ? h('span', { class: 'badge tag-text-only', title: 'Attachments were left out for this model' }, 'text only') : null,
+        best ? h('span', { class: 'badge best', title: 'Picked by the judge as the best answer' }, '🏆 best (' + Math.round(turn.judge.p * 100) + ' %)') : null), statusLine(r)),
       uniqueInputs > 1 && !textOnly ? h('div', { class: 'cell-input' }, h('span', { class: 'muted small' }, 'You: '), displayText(turn.inputs[lane.id])) : null,
       h('div', { class: 'md', html: r.content ? MC.md.render(r.content) : r.status === 'streaming' ? '<p class="muted">…</p>' : '' }),
       r.servedModel ? h('div', { class: 'served muted small', title: r.servedModel }, '→ answered by ' + modelShort(r.servedModel)) : null,
@@ -257,10 +259,19 @@
     if (!route) return null;
     const summary = routeSummary(conv, turn);
     const ids = route.candidates || [];
+    const judge = turn.judge;
+    const runner = app().state.runner;
+    const judgeBusy = runner.isBusy(turn.id) || (judge && judge.status === 'streaming');
     return h('div', { class: 'route-bar', dataset: { route: turn.id } },
       h('div', { class: 'route-line', title: summary + (route.note ? ' · ' + route.note : '') },
         h('span', { class: 'route-summary' }, summary),
-        route.note ? h('span', { class: 'route-note muted' }, ' · ' + route.note) : null),
+        route.note ? h('span', { class: 'route-note muted' }, ' · ' + route.note) : null,
+        judge && judge.status === 'streaming' ? h('span', { class: 'route-judge muted small' }, ' · 🏆 judging…') : null,
+        judge && judge.status === 'error' ? h('span', { class: 'route-judge-error', role: 'alert' }, ' · ⚠ Judge failed: ' + (judge.error || 'error')) : null,
+        judge && judge.status !== 'streaming' ? h('button', {
+          class: 'ghost small judge-again', disabled: judgeBusy, title: 'Ask the judge again which answer is best',
+          onclick: () => app().judgeTurn(conv, turn),
+        }, 'Judge again') : null),
       ids.length ? h('details', { class: 'route-candidates' }, h('summary', { class: 'muted small' }, `candidates (${ids.length})`),
         h('ul', { class: 'small' }, ids.map((id) => h('li', {}, h('code', {}, id))))) : null);
   }
@@ -379,6 +390,20 @@
     MC.dom.append(clear(el), [MC.ui.derived.render(conv, turn)]);
     const actions = document.querySelector(`#chat [data-actions="${turnId}"]`);
     if (actions) actions.replaceWith(turnActions(conv, turn));
+    const routeEl = document.querySelector(`#chat [data-route="${turnId}"]`);
+    if (routeEl) {
+      const next = routeBar(conv, turn);
+      const open = routeEl.querySelector('details[open]');
+      if (open && next.querySelector('details')) next.querySelector('details').open = true;
+      routeEl.replaceWith(next);
+    }
+    if (turn.judge && turn.judge.status !== 'streaming') {
+      const lanes = visibleLanes(conv);
+      lanes.forEach((l, i) => {
+        const cellEl = document.querySelector(`#chat [data-cell="${turnId}:${l.id}"]`);
+        if (cellEl && !cellEl.classList.contains('status-streaming') && !cellEl.querySelector('.inline-reply textarea')) cellEl.replaceWith(cell(conv, turn, l, i));
+      });
+    }
   }
 
   function focusLane(i) {
