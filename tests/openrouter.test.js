@@ -159,3 +159,76 @@ test('complete forwards plugins', async () => {
   await api.complete({ key: 'k', model: 'm', messages: [], fetchImpl, plugins: [{ id: 'file-parser', pdf: { engine: 'native' } }] });
   assert.equal(body.plugins[0].pdf.engine, 'native');
 });
+
+const mcChunk = (text, model) => 'data: ' + JSON.stringify(Object.assign({ choices: [{ delta: { content: text } }] }, model ? { model } : {})) + '\n\n';
+
+test('decide posts to alpha/decisions with model, state, questions', async () => {
+  const calls = [];
+  const fetchImpl = async (url, opts) => { calls.push({ url, body: JSON.parse(opts.body), headers: opts.headers });
+    return jsonResponse({ model: 'perplexity/pplx-decider-v1.2', answers: { pick: { type: 'choice', choice: 'a/x', probabilities: { 'a/x': 0.7 } } }, usage: { input_tokens: 120, output_tokens: 0, cost: 0.0000024 } }); };
+  const r = await api.decide({ key: 'k', model: 'perplexity/pplx-decider-v1.2', state: ['hi'], questions: { pick: { type: 'choice' } }, fetchImpl });
+  assert.equal(calls[0].url, 'https://openrouter.ai/api/alpha/decisions');
+  assert.deepEqual(Object.keys(calls[0].body).sort(), ['model', 'questions', 'state']);
+  assert.equal(calls[0].headers.Authorization, 'Bearer k');
+  assert.deepEqual(r.usage, { inputTokens: 120, cost: 0.0000024 });
+  assert.equal(r.answers.pick.choice, 'a/x');
+  assert.equal(r.model, 'perplexity/pplx-decider-v1.2');
+});
+
+test('decide retries systemone once on 404', async () => {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(url);
+    if (urls.length === 1) return jsonResponse({ error: { message: 'nope' } }, 404);
+    return jsonResponse({ model: 'm/d', answers: { q: { type: 'choice', choice: 'x' } }, usage: { input_tokens: 5 } });
+  };
+  const r = await api.decide({ key: 'k', model: 'm/d', state: ['hi'], questions: {}, fetchImpl });
+  assert.deepEqual(urls, ['https://openrouter.ai/api/alpha/decisions', 'https://openrouter.ai/api/v1/systemone']);
+  assert.equal(r.answers.q.choice, 'x');
+  assert.deepEqual(r.usage, { inputTokens: 5, cost: null });
+  assert.deepEqual(api.DECIDE_URLS, urls);
+});
+
+test('decide throws ApiError with status on 429 and does not retry', async () => {
+  let n = 0;
+  const fetchImpl = async () => { n++; return jsonResponse({ error: { message: 'slow down' } }, 429); };
+  await assert.rejects(
+    api.decide({ key: 'k', model: 'm/d', state: [], questions: {}, fetchImpl }),
+    (err) => err instanceof api.ApiError && err.status === 429 && err.message === 'slow down',
+  );
+  assert.equal(n, 1);
+});
+
+test('decide throws when every URL returns 404', async () => {
+  let n = 0;
+  const fetchImpl = async () => { n++; return jsonResponse({}, 404); };
+  await assert.rejects(api.decide({ key: 'k', model: 'm/d', state: [], questions: {}, fetchImpl }), (err) => err.status === 404);
+  assert.equal(n, 2);
+});
+
+test('fetchDeciders requests output_modalities=decisions', async () => {
+  let seen;
+  const fetchImpl = async (url) => { seen = url; return jsonResponse({ data: [{ id: 'a/d' }, { id: 'b/d' }] }); };
+  const r = await api.fetchDeciders({ fetchImpl });
+  assert.ok(seen.endsWith('/models?output_modalities=decisions'));
+  assert.deepEqual(r.map((m) => m.id), ['a/d', 'b/d']);
+});
+
+test('streamChat sends extraBody and returns servedModel', async () => {
+  let body;
+  const fetchImpl = async (url, opts) => {
+    body = JSON.parse(opts.body);
+    return sseResponse([mcChunk('Hi', 'anthropic/claude-sonnet-5'), mcChunk('!', 'anthropic/claude-sonnet-5'), 'data: [DONE]\n\n']);
+  };
+  const res = await api.streamChat({ key: 'k', model: 'openrouter/auto', messages: [], extraBody: { session_id: 'c_1' }, fetchImpl });
+  assert.equal(body.session_id, 'c_1');
+  assert.equal(body.model, 'openrouter/auto');
+  assert.equal(res.servedModel, 'anthropic/claude-sonnet-5');
+  assert.equal(res.content, 'Hi!');
+});
+
+test('streamChat servedModel is null when chunks have no model', async () => {
+  const fetchImpl = async () => sseResponse([delta('Hi'), 'data: [DONE]\n\n']);
+  const res = await api.streamChat({ key: 'k', model: 'm/x', messages: [], fetchImpl });
+  assert.equal(res.servedModel, null);
+});

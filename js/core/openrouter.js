@@ -8,6 +8,8 @@
   'use strict';
 
   const BASE = 'https://openrouter.ai/api/v1';
+  // Decision endpoint: documented alpha path first, systemone only on 404.
+  const DECIDE_URLS = ['https://openrouter.ai/api/alpha/decisions', 'https://openrouter.ai/api/v1/systemone'];
 
   class ApiError extends Error {
     // status: HTTP status number, or 'aborted' | 'network'
@@ -79,11 +81,11 @@
 
   const withPlugins = (body, plugins) => (Array.isArray(plugins) && plugins.length ? Object.assign(body, { plugins }) : body);
 
-  async function streamChat({ key, model, messages, signal, onDelta, plugins, fetchImpl = globalThis.fetch }) {
+  async function streamChat({ key, model, messages, signal, onDelta, plugins, extraBody, fetchImpl = globalThis.fetch }) {
     const res = await doFetch(fetchImpl, BASE + '/chat/completions', {
       method: 'POST',
       headers: headers(key),
-      body: JSON.stringify(withPlugins({ model, messages, stream: true, usage: { include: true } }, plugins)),
+      body: JSON.stringify(Object.assign(withPlugins({ model, messages, stream: true, usage: { include: true } }, plugins), extraBody || {})),
       signal,
     }, signal);
     if (!res.ok) throw await errorFromResponse(res);
@@ -91,11 +93,13 @@
     let content = '';
     let usage = null;
     let finishReason = null;
+    let servedModel = null;
     let streamError = null;
     let done = false;
     const parser = createSseParser((ev) => {
       if (ev === '[DONE]') { done = true; return; }
       if (ev.error) { streamError = new ApiError(ev.error.code || 500, ev.error.message || 'Stream error'); return; }
+      if (ev.model) servedModel = ev.model;
       const ch = ev.choices && ev.choices[0];
       if (ch) {
         const t = ch.delta && ch.delta.content;
@@ -121,7 +125,7 @@
       if (done || streamError) { try { reader.cancel(); } catch (e) { /* ignore */ } }
     }
     if (streamError) { streamError.partial = content; throw streamError; }
-    return { content, usage, finishReason };
+    return { content, usage, finishReason, servedModel };
   }
 
   async function complete({ key, model, messages, responseFormat, signal, plugins, fetchImpl = globalThis.fetch }) {
@@ -144,6 +148,26 @@
     if (!res.ok) throw await errorFromResponse(res);
     const body = await res.json();
     return Array.isArray(body.data) ? body.data : [];
+  }
+
+  async function fetchDeciders({ fetchImpl = globalThis.fetch } = {}) {
+    const res = await doFetch(fetchImpl, BASE + '/models?output_modalities=decisions', { headers: { 'X-Title': 'Multaichat' } });
+    if (!res.ok) throw await errorFromResponse(res);
+    const body = await res.json();
+    return Array.isArray(body.data) ? body.data : [];
+  }
+
+  async function decide({ key, model, state, questions, signal, fetchImpl = globalThis.fetch }) {
+    let res;
+    for (const url of DECIDE_URLS) {
+      res = await doFetch(fetchImpl, url, { method: 'POST', headers: headers(key), body: JSON.stringify({ model, state, questions }), signal }, signal);
+      if (res.status !== 404) break; // only a 404 falls through to the next URL
+    }
+    if (!res.ok) throw await errorFromResponse(res);
+    const data = await res.json();
+    if (data.error) throw new ApiError(data.error.code || 500, data.error.message || 'Error');
+    const u = data.usage || {};
+    return { model: data.model || model, answers: data.answers || {}, usage: { inputTokens: u.input_tokens || 0, cost: u.cost != null ? u.cost : null } };
   }
 
   async function testKey({ key, fetchImpl = globalThis.fetch }) {
@@ -169,5 +193,5 @@
     return (err && err.message) || 'Something went wrong';
   }
 
-  return { BASE, ApiError, createSseParser, headers, streamChat, complete, fetchModels, testKey, errorMessage };
+  return { BASE, DECIDE_URLS, ApiError, createSseParser, headers, streamChat, complete, fetchModels, fetchDeciders, decide, testKey, errorMessage };
 });
