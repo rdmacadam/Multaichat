@@ -12,6 +12,12 @@
     });
   }
 
+  function hasAlpha(ctx, w, h) {
+    const px = ctx.getImageData(0, 0, w, h).data;
+    for (let i = 3; i < px.length; i += 4) if (px[i] < 255) return true;
+    return false;
+  }
+
   async function readImage(file, maxSide) {
     let bmp;
     try { bmp = await createImageBitmap(file); } catch (e) { throw new Error(`Could not read image ${file.name}`); }
@@ -27,10 +33,12 @@
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = hgt;
-    canvas.getContext('2d').drawImage(bmp, 0, 0, w, hgt);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(bmp, 0, 0, w, hgt);
     bmp.close();
-    // PNG and GIF (first frame) stay lossless; photos become JPEG.
-    const mime = file.type === 'image/png' || isGif ? 'image/png' : 'image/jpeg';
+    // GIF (first frame) and images with transparency stay PNG; everything else
+    // becomes JPEG, which keeps large photos within providers' per-image limits.
+    const mime = isGif || hasAlpha(ctx, w, hgt) ? 'image/png' : 'image/jpeg';
     return { data: canvas.toDataURL(mime, 0.85), width: w, height: hgt, mime };
   }
 
@@ -48,19 +56,28 @@
       ref.mime = 'application/pdf';
       data = await readAs(file);
     } else {
-      text = await readAs(file, 'text');
+      // Read at most the limit: a huge log must not be loaded or stored whole.
+      text = await readAs(file.slice(0, limits.maxTextBytes), 'text');
+      if (file.size > limits.maxTextBytes) text += '\n…[truncated at 200 KB]';
       data = text;
     }
     return { ref, record: Object.assign({}, ref, { data, createdAt: Date.now() }), text };
+  }
+
+  function dataUrlBytes(url) {
+    const b64 = String(url).slice(String(url).indexOf(',') + 1);
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
   }
 
   // data URL (or text) -> object URL for display/download; cached per id.
   const urls = new Map();
   async function objectUrl(record) {
     if (urls.has(record.id)) return urls.get(record.id);
-    const blob = record.kind === 'text'
-      ? new Blob([record.data], { type: record.mime || 'text/plain' })
-      : await (await fetch(record.data)).blob();
+    const type = MC.attach.blobType(record);
+    const blob = record.kind === 'text' ? new Blob([record.data], { type }) : new Blob([dataUrlBytes(record.data)], { type });
     const u = URL.createObjectURL(blob);
     urls.set(record.id, u);
     return u;

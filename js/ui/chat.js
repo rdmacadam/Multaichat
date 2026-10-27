@@ -186,7 +186,10 @@
   }
 
   function promptRow(conv, turn) {
-    const unique = [...new Set(mainInputs(turn))];
+    let main = mainInputs(turn);
+    // Every lane got the text-only version: show it without the omitted-image notes.
+    if (!main.length) main = Object.values(turn.inputs).map((t) => t.replace(/\n*\[image omitted: [^\]\n]*\]/g, ''));
+    const unique = [...new Set(main)];
     const ids = Object.keys(turn.inputs);
     const addressed = ids.length + Object.keys(turn.skipped || {}).length;
     const allActive = conv.lanes.filter((l) => l.active).length;

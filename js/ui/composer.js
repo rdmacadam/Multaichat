@@ -82,11 +82,19 @@
 
   async function submit() {
     const text = view.ta.value.trim();
-    if ((!text && !view.files.length) || busy()) return;
+    if ((!text && !view.files.length) || busy() || view.sending) return;
     if (!app().state.settings.getKey()) { toast('Add your OpenRouter API key first', 'warn'); MC.ui.settings.open(); return; }
     if (view.files.length) {
       const target = view.target;
-      const ok = await app().sendWithAttachments(text, view.files.slice(), target);
+      // Reading, the capability question and saving take a while before the
+      // runner is busy; block a second send meanwhile.
+      view.sending = true;
+      view.send.disabled = true;
+      let ok = false;
+      try { ok = await app().sendWithAttachments(text, view.files.slice(), target); } finally {
+        view.sending = false;
+        view.send.disabled = false;
+      }
       if (!ok) return; // keep text and chips
       view.files = [];
       renderTray();

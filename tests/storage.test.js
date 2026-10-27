@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const { load } = require('./load');
 const { memoryStorage } = require('./helpers');
 load('util');
+load('attach');
 const storage = load('storage');
 
 test('normalizeKey trims, strips Bearer and inner whitespace', () => {
@@ -186,4 +187,12 @@ test('parseImport accepts v1 and v2', () => {
   assert.equal(r.attachments[0].data, 'data:image/png;base64,AA');
   assert.equal(r.presets[0].id, 'p_1');
   assert.throws(() => storage.parseImport('{"app":"other"}'), /Not a Multaichat export/);
+});
+
+test('parseImport drops unsafe attachment records', () => {
+  load('attach');
+  const bad = { id: 'evil', kind: 'image', name: 'x.png', data: 'data:text/html;base64,PHNjcmlwdD4=' };
+  const good = rec('a1');
+  const r = storage.parseImport(storage.exportJson([], { attachments: [bad, good] }));
+  assert.deepEqual(r.attachments.map((a) => a.id), ['a1']);
 });

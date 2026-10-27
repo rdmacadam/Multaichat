@@ -66,7 +66,7 @@
 
     const clearAll = async () => {
       if (!confirm('Delete your API key, settings and ALL conversations stored in this browser?')) return;
-      for (const c of await app.state.store.all()) await app.state.store.delete(c.id);
+      await app.state.store.clearAll();
       app.state.settings.clearAll();
       location.reload();
     };

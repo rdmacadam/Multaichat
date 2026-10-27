@@ -27,19 +27,25 @@ function listJs(dir) {
 
 const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const scripts = [...html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]);
+const noQuery = (u) => u.split('?')[0];
 const links = [...html.matchAll(/<link\b[^>]*\bhref="([^"]+)"/g)].map((m) => m[1]).filter((u) => !u.startsWith('data:'));
 
 // 1. every asset is relative and exists (absolute paths break under /Multaichat/)
 report('assets are relative and exist', scripts.concat(links).flatMap((u) => {
   if (/^([a-z]+:)?\/\//i.test(u) || u.startsWith('/')) return [`${u}: not a relative path`];
-  return fs.existsSync(path.join(ROOT, u)) ? [] : [`${u}: file missing`];
+  return fs.existsSync(path.join(ROOT, noQuery(u))) ? [] : [`${u}: file missing`];
 }));
+
+// 1b. every script and stylesheet carries a version query so a deploy never
+// mixes freshly fetched files with stale cached ones
+report('scripts and styles are cache-busted (?v=…)', scripts.concat(links).filter((u) => !/[?&]v=[\w.-]+$/.test(u)).map((u) => `${u}: no ?v= version`));
 
 // 2. every js file is loaded exactly once and app.js runs last
 const jsFiles = listJs(path.join(ROOT, 'js')).map((p) => path.relative(ROOT, p).split(path.sep).join('/'));
+const bare = scripts.map(noQuery);
 report('every script is loaded once, app.js last', [
-  ...jsFiles.filter((f) => scripts.filter((s) => s === f).length !== 1).map((f) => `${f}: referenced ${scripts.filter((s) => s === f).length} times`),
-  ...(scripts[scripts.length - 1] === 'js/app.js' ? [] : ['js/app.js is not the last script']),
+  ...jsFiles.filter((f) => bare.filter((s) => s === f).length !== 1).map((f) => `${f}: referenced ${bare.filter((s) => s === f).length} times`),
+  ...(bare[bare.length - 1] === 'js/app.js' ? [] : ['js/app.js is not the last script']),
 ]);
 
 async function loads(browser, url) {

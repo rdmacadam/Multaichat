@@ -83,9 +83,10 @@
   // Per-lane inputs for a message with attachments. Text files are inlined for
   // everyone; images/PDFs travel as parts (added later by buildMessages) to
   // 'full' lanes. Lanes that can't read images are skipped or sent text only.
+  // textContents is keyed by attachment id (two files may share a name).
   function buildInputs({ text, refs, textContents, laneIds, incapableIds, choice }) {
     let body = String(text || '');
-    for (const r of refs || []) if (r.kind === 'text') body += textBlock(r.name, (textContents || {})[r.name]);
+    for (const r of refs || []) if (r.kind === 'text') body += textBlock(r.name, (textContents || {})[r.id]);
     if (!String(text || '').trim()) body = body.replace(/^\n+/, '');
     const hasImages = images(refs).length > 0;
     const inputs = {};
@@ -105,5 +106,26 @@
     return { inputs, delivery, skipped };
   }
 
-  return { LIMITS, TEXT_EXT, SKIP_REASON, classify, validate, textBlock, toParts, omittedLines, summaryNote, incapable, pdfEngine, buildInputs };
+  // MIME type for a stored record's blob URL. Stored data (user files, imports)
+  // must never pick an active type like text/html: blob URLs run in our origin.
+  function blobType(record) {
+    if (record.kind === 'text') return 'text/plain;charset=utf-8';
+    if (record.kind === 'pdf') return 'application/pdf';
+    if (record.kind === 'image' && IMAGE_TYPES.includes(record.mime)) return record.mime;
+    return 'application/octet-stream';
+  }
+
+  const DATA_URL = {
+    image: /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]*$/,
+    pdf: /^data:application\/pdf;base64,[A-Za-z0-9+/=]*$/,
+  };
+
+  // Shape check for records coming from imports.
+  function validRecord(r) {
+    if (!r || typeof r.id !== 'string' || !r.id || typeof r.name !== 'string') return false;
+    if (r.kind === 'text') return typeof r.data === 'string';
+    return !!DATA_URL[r.kind] && typeof r.data === 'string' && DATA_URL[r.kind].test(r.data);
+  }
+
+  return { LIMITS, TEXT_EXT, SKIP_REASON, blobType, validRecord, classify, validate, textBlock, toParts, omittedLines, summaryNote, incapable, pdfEngine, buildInputs };
 });

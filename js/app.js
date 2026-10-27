@@ -197,7 +197,7 @@
       toast('Could not save attachment: ' + e.message, 'error');
       return false;
     }
-    const textContents = Object.fromEntries(read.filter((r) => r.ref.kind === 'text').map((r) => [r.ref.name, r.text]));
+    const textContents = Object.fromEntries(read.filter((r) => r.ref.kind === 'text').map((r) => [r.ref.id, r.text]));
     const { inputs, delivery, skipped } = MC.attach.buildInputs({ text, refs, textContents, laneIds: lanes.map((l) => l.id), incapableIds, choice });
     if (!Object.keys(inputs).length) { toast('None of the selected models can read images', 'warn'); return false; }
     const p = sendTurn(targetLaneId ? 'targeted' : 'broadcast', inputs, { attachments: refs, delivery, skipped });

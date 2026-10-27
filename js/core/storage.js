@@ -132,6 +132,7 @@
       async getAttachment(id) { return read(K_ATTACH)[id]; },
       async putAttachment(rec) { const all = read(K_ATTACH); all[rec.id] = rec; write(all, K_ATTACH); },
       async deleteAttachment(id) { const all = read(K_ATTACH); delete all[id]; write(all, K_ATTACH); },
+      async clearAll() { ls.removeItem(K_CONVS); ls.removeItem(K_ATTACH); },
     });
   }
 
@@ -142,13 +143,25 @@
     });
   }
 
+  // Resolves only once the write is committed: quota errors surface as a
+  // transaction abort after the request itself has already succeeded.
+  function idbWrite(db, names, fn) {
+    return new Promise((resolve, reject) => {
+      const t = db.transaction(names, 'readwrite');
+      [].concat(names).forEach((n) => fn(t.objectStore(n)));
+      t.oncomplete = () => resolve();
+      t.onabort = t.onerror = () => reject(t.error || new Error('IndexedDB write failed'));
+    });
+  }
+
   function idbStore(db) {
     const tx = (mode, name = 'conversations') => db.transaction(name, mode).objectStore(name);
     return withAttachmentHelpers({
       kind: 'idb',
       async getAttachment(id) { return idbRequest(tx('readonly', 'attachments').get(id)); },
-      async putAttachment(rec) { await idbRequest(tx('readwrite', 'attachments').put(rec)); },
-      async deleteAttachment(id) { await idbRequest(tx('readwrite', 'attachments').delete(id)); },
+      putAttachment(rec) { return idbWrite(db, 'attachments', (s) => s.put(rec)); },
+      deleteAttachment(id) { return idbWrite(db, 'attachments', (s) => s.delete(id)); },
+      clearAll() { return idbWrite(db, ['conversations', 'attachments'], (s) => s.clear()); },
       async list() { return (await idbRequest(tx('readonly').getAll())).map(meta).sort(byUpdatedDesc); },
       async get(id) { return idbRequest(tx('readonly').get(id)); },
       async put(conv) { await idbRequest(tx('readwrite').put(conv)); },
@@ -205,7 +218,7 @@
     }
     return {
       conversations: obj.conversations,
-      attachments: Array.isArray(obj.attachments) ? obj.attachments.filter((a) => a && a.id) : [],
+      attachments: Array.isArray(obj.attachments) ? obj.attachments.filter((a) => MC.attach && MC.attach.validRecord(a)) : [],
       presets: Array.isArray(obj.presets) ? obj.presets : [],
     };
   }

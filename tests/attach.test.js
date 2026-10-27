@@ -80,7 +80,7 @@ test('pdfEngine per model and mode', () => {
 });
 
 test('buildInputs skip', () => {
-  const r = A.buildInputs({ text: 'Look', refs, textContents: { 'notes.md': 'N' }, laneIds: ['L1', 'L2'], incapableIds: ['L2'], choice: 'skip' });
+  const r = A.buildInputs({ text: 'Look', refs, textContents: { t1: 'N' }, laneIds: ['L1', 'L2'], incapableIds: ['L2'], choice: 'skip' });
   const body = 'Look\n\n--- file: notes.md ---\nN\n--- end of notes.md ---';
   assert.deepEqual(r, { inputs: { L1: body }, delivery: { L1: 'full' }, skipped: { L2: "can't read images" } });
 });
@@ -91,8 +91,38 @@ test('buildInputs text only', () => {
 });
 
 test('buildInputs without images ignores choice', () => {
-  const r = A.buildInputs({ text: '', refs: refs.slice(1), textContents: { 'notes.md': 'N' }, laneIds: ['L1', 'L2'], incapableIds: ['L2'], choice: 'skip' });
+  const r = A.buildInputs({ text: '', refs: refs.slice(1), textContents: { t1: 'N' }, laneIds: ['L1', 'L2'], incapableIds: ['L2'], choice: 'skip' });
   assert.deepEqual(Object.keys(r.inputs), ['L1', 'L2']);
   assert.deepEqual(r.delivery, { L1: 'full', L2: 'full' });
   assert.ok(r.inputs.L1.startsWith('--- file: notes.md ---'), 'no leading blank lines when text is empty');
+});
+
+test('buildInputs keys text contents by attachment id (same names stay distinct)', () => {
+  const two = [{ id: 'tA', kind: 'text', name: 'README.md' }, { id: 'tB', kind: 'text', name: 'README.md' }];
+  const r = A.buildInputs({ text: 'Compare', refs: two, textContents: { tA: 'first', tB: 'second' }, laneIds: ['L1'], incapableIds: [], choice: null });
+  assert.ok(r.inputs.L1.includes('README.md ---\nfirst\n'));
+  assert.ok(r.inputs.L1.includes('README.md ---\nsecond\n'));
+});
+
+test('blobType never lets stored data pick an active type', () => {
+  assert.equal(A.blobType({ kind: 'text', mime: 'text/html' }), 'text/plain;charset=utf-8');
+  assert.equal(A.blobType({ kind: 'pdf', mime: 'text/html' }), 'application/pdf');
+  assert.equal(A.blobType({ kind: 'image', mime: 'image/webp' }), 'image/webp');
+  assert.equal(A.blobType({ kind: 'image', mime: 'text/html' }), 'application/octet-stream');
+  assert.equal(A.blobType({ kind: 'image', mime: 'image/svg+xml' }), 'application/octet-stream');
+  assert.equal(A.blobType({ kind: 'html', mime: 'text/html' }), 'application/octet-stream');
+});
+
+test('validRecord accepts only well-formed records', () => {
+  const ok = (r) => A.validRecord(Object.assign({ id: 'a1', name: 'x' }, r));
+  assert.equal(ok({ kind: 'image', data: 'data:image/png;base64,AA' }), true);
+  assert.equal(ok({ kind: 'image', data: 'data:text/html;base64,PHNjcmlwdD4=' }), false);
+  assert.equal(ok({ kind: 'image', data: 'data:image/svg+xml;base64,AA' }), false);
+  assert.equal(ok({ kind: 'pdf', data: 'data:application/pdf;base64,AA' }), true);
+  assert.equal(ok({ kind: 'pdf', data: 'data:text/html;base64,AA' }), false);
+  assert.equal(ok({ kind: 'text', data: '<script>x</script>' }), true);
+  assert.equal(ok({ kind: 'text', data: 5 }), false);
+  assert.equal(ok({ kind: 'html', data: 'x' }), false);
+  assert.equal(A.validRecord(null), false);
+  assert.equal(A.validRecord({ kind: 'text', data: 'x', name: 'n' }), false, 'needs id');
 });

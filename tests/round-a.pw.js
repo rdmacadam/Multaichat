@@ -389,6 +389,103 @@ const cases = {
     await page.click('.conv-open');
     await page.waitForSelector('.turn .att-thumb img[src^="blob:"]');
   },
+
+  async 'opened attachments never run as pages'(page) {
+    await attachFiles(page, [{ name: 'page.html', mimeType: 'text/html', buffer: Buffer.from('<script>document.title="PWNED"</script>') }]);
+    await ask(page, 'Review');
+    await allDone(page, 1);
+    await page.waitForSelector('.turn .att-file[href^="blob:"]');
+    const type = await page.evaluate(async () => (await (await fetch(document.querySelector('.turn .att-file').href)).blob()).type);
+    assert.match(type, /^text\/plain/);
+  },
+
+  async 'import rejects attachment records with active content'(page) {
+    const conv = { id: 'c_imp', title: 'Imported', createdAt: 1, updatedAt: 1, lanes: [{ id: 'l1', modelId: 'openai/gpt-6', modelName: 'GPT-6', active: true, joinedAtTurn: 0 }],
+      turns: [{ id: 't1', index: 0, kind: 'broadcast', inputs: { l1: 'x' }, responses: { l1: { status: 'done', content: 'y', previous: [] } }, attachments: [{ id: 'evil', kind: 'image', name: 'cat.png' }] }] };
+    const evil = { id: 'evil', kind: 'image', name: 'cat.png', mime: 'image/png', size: 1, data: 'data:text/html;base64,' + Buffer.from('<script>document.title=localStorage.getItem("mc.apiKey")</script>').toString('base64') };
+    const file = require('path').join(require('os').tmpdir(), 'mc-evil-export.json');
+    require('fs').writeFileSync(file, JSON.stringify({ app: 'multaichat', version: 2, conversations: [conv], attachments: [evil], presets: [] }));
+    await page.setInputFiles('#sidebar input[type=file]', file);
+    await page.waitForSelector('.conv');
+    assert.equal(await page.evaluate(() => MC.app.state.store.getAttachment('evil')), undefined);
+    await page.click('.conv-open');
+    await page.waitForSelector('.turn .att-thumb.missing');
+  },
+
+  async 'attachment quota failure on IndexedDB keeps composer'(page) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Storage.overrideQuotaForOrigin', { origin: new URL(base).origin, quotaSize: 200 * 1024 });
+    const noise = await page.evaluate(async () => {
+      const c = new OffscreenCanvas(1500, 1500); const g = c.getContext('2d'); const d = g.createImageData(1500, 1500);
+      for (let i = 0; i < d.data.length; i++) d.data[i] = (Math.random() * 256) | 0;
+      g.putImageData(d, 0, 0);
+      return [...new Uint8Array(await (await c.convertToBlob({ type: 'image/png' })).arrayBuffer())];
+    });
+    await attachFiles(page, [{ name: 'noise.png', mimeType: 'image/png', buffer: Buffer.from(noise) }]);
+    await page.fill('#prompt', 'Keep me');
+    await page.press('#prompt', 'Enter');
+    await page.waitForSelector('.toast:has-text("Could not save attachment")', { timeout: 10000 });
+    assert.equal(page.requests.length, 0);
+    assert.equal(await page.inputValue('#prompt'), 'Keep me');
+    assert.equal(await page.locator('#composer .att-chip').count(), 1);
+  },
+
+  async 'double click on Send sends once'(page) {
+    await attachFiles(page, [PNG]);
+    await page.fill('#prompt', 'Once');
+    await page.evaluate(() => { const b = document.querySelector('#composer button[aria-label=Send]'); b.click(); b.click(); });
+    await allDone(page, 1);
+    await page.waitForTimeout(500);
+    assert.equal(await page.locator('.turn').count(), 1);
+    assert.equal(page.requests.length, 3);
+  },
+
+  async 'clear all local data removes attachments'(page) {
+    page.on('dialog', (d) => d.accept());
+    await attachFiles(page, [PNG]);
+    await ask(page, 'Keep');
+    await allDone(page, 1);
+    await page.click('button[aria-label=Settings]');
+    await Promise.all([page.waitForNavigation(), page.click('#settings-dialog button:has-text("Clear all local data")')]);
+    const n = await page.evaluate(() => new Promise((res) => {
+      const r = indexedDB.open('multaichat');
+      r.onsuccess = () => { const db = r.result; const q = db.transaction('attachments').objectStore('attachments').count(); q.onsuccess = () => { res(q.result); db.close(); }; };
+    }));
+    assert.equal(n, 0);
+  },
+
+  async 'typed text shows when every model got text only'(page) {
+    await page.evaluate((l) => MC.app.setSelection([l]), LLAMA);
+    await attachFiles(page, [PNG]);
+    await ask(page, 'WHAT IS THIS PICTURE');
+    await page.click('#attach-dialog button:has-text("Send text only")');
+    await allDone(page, 1);
+    assert.ok((await page.textContent('.turn .bubble')).includes('WHAT IS THIS PICTURE'));
+    assert.ok(!(await page.textContent('.turn .bubble')).includes('[image omitted'));
+  },
+
+  async 'large opaque PNG is sent as JPEG, transparent stays PNG'(page) {
+    const make = (alpha) => page.evaluate(async (a) => {
+      const c = new OffscreenCanvas(3000, 2000); const g = c.getContext('2d');
+      g.fillStyle = a ? 'rgba(50,100,200,0.5)' : '#3264c8'; g.fillRect(0, 0, 3000, 2000);
+      return [...new Uint8Array(await (await c.convertToBlob({ type: 'image/png' })).arrayBuffer())];
+    }, alpha);
+    await attachFiles(page, [{ name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from(await make(false)) }, { name: 'logo.png', mimeType: 'image/png', buffer: Buffer.from(await make(true)) }]);
+    await ask(page, 'Two');
+    await allDone(page, 1);
+    const parts = lastUser(reqFor(page, 'anthropic/claude-sonnet-5')).content.filter((p) => p.type === 'image_url').map((p) => p.image_url.url.slice(0, 15));
+    assert.deepEqual(parts, ['data:image/jpeg', 'data:image/png;']);
+  },
+
+  async 'large text file is read only up to the limit'(page) {
+    await attachFiles(page, [{ name: 'big.log', mimeType: 'text/plain', buffer: Buffer.alloc(3 * 1024 * 1024, 'a') }]);
+    await ask(page, 'Log');
+    await allDone(page, 1);
+    const id = await page.evaluate(() => MC.app.state.conv.turns[0].attachments[0].id);
+    const len = await page.evaluate(async (i) => (await MC.app.state.store.getAttachment(i)).data.length, id);
+    assert.ok(len <= 204800 + 40, 'stored text capped: ' + len);
+    assert.ok(lastUser(page.requests[0]).content.includes('…[truncated at 200 KB]'));
+  },
 };
 
 (async () => {
