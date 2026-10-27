@@ -132,7 +132,8 @@
     if (!(lane.id in turn.inputs)) {
       base.class += ' not-asked';
       const reason = turn.skipped && turn.skipped[lane.id];
-      return h('div', base, h('span', { class: 'muted small' }, reason ? '— not sent: ' + reason : '— not asked this turn'));
+      if (!reason && turn.route) base.class += ' not-routed';
+      return h('div', base, h('span', { class: 'muted small' }, reason ? '— not sent: ' + reason : turn.route ? '— not routed this turn' : '— not asked this turn'));
     }
     const r = turn.responses[lane.id];
     base.class += ' status-' + r.status;
@@ -153,6 +154,7 @@
         textOnly ? h('span', { class: 'badge tag-text-only', title: 'Attachments were left out for this model' }, 'text only') : null), statusLine(r)),
       uniqueInputs > 1 && !textOnly ? h('div', { class: 'cell-input' }, h('span', { class: 'muted small' }, 'You: '), displayText(turn.inputs[lane.id])) : null,
       h('div', { class: 'md', html: r.content ? MC.md.render(r.content) : r.status === 'streaming' ? '<p class="muted">…</p>' : '' }),
+      r.servedModel ? h('div', { class: 'served muted small', title: r.servedModel }, '→ answered by ' + modelShort(r.servedModel)) : null,
       r.status === 'error' ? h('div', { class: 'cell-error', role: 'alert' }, '⚠ ', r.error || 'Error',
         paid ? h('button', { class: 'ghost small', onclick: () => { lane.modelId = paid.id; lane.modelName = paid.name; runner.retry(conv, turn.id, lane.id); app().refresh(); } }, 'Use paid variant') : null) : null,
       r.previous && r.previous.length ? h('details', { class: 'previous' }, h('summary', {}, `previous (${r.previous.length})`),
@@ -206,6 +208,63 @@
         text || null) : null);
   }
 
+  // ---------- route bar (spec §6.5) ----------
+  const MODE_NAMES = { auto: 'Full auto', free: 'Best free', diverse: 'Diverse perspectives', best: 'Very best answer', manual: 'Full manual', native: 'OpenRouter native' };
+  const NATIVE_NAME = 'OpenRouter Auto';
+
+  function modelShort(id, conv) {
+    const m = app().modelById(id);
+    if (m) return shortName(m.name);
+    const lane = conv && conv.lanes.find((l) => l.modelId === id);
+    return lane ? shortName(lane.modelName) : id;
+  }
+
+  function deciderShort(id) {
+    const d = (app().state.deciders || []).find((x) => x.id === id);
+    return d ? shortName(d.name) : String(id).split('/').pop();
+  }
+
+  const seconds = (ms) => (Math.max(0, Number(ms) || 0) / 1000).toFixed(1) + ' s';
+
+  // The model OpenRouter's Auto Router chose for a native turn, if known.
+  function servedOf(conv, turn) {
+    for (const laneId of Object.keys(turn.inputs)) {
+      const lane = MC.conv.laneById(conv, laneId);
+      const r = turn.responses[laneId];
+      if (lane && lane.modelId === MC.router.NATIVE_ID && r && r.servedModel) return r.servedModel;
+    }
+    return null;
+  }
+
+  function routeSummary(conv, turn) {
+    const route = turn.route;
+    if (route.method === 'native') {
+      const served = servedOf(conv, turn);
+      return '🧭 ' + NATIVE_NAME + (served ? ' · answered by ' + modelShort(served, conv) : '');
+    }
+    const bits = ['🧭 ' + (MODE_NAMES[route.mode] || route.mode)];
+    if (route.method === 'rules') bits.push('picked by rules');
+    else if (route.decisionModel) bits.push(deciderShort(route.decisionModel));
+    if (route.task) bits.push('task: ' + route.task);
+    if (route.usage && route.usage.cost != null) bits.push(U.formatCost(route.usage.cost));
+    if (route.ms != null) bits.push(seconds(route.ms));
+    const picks = (route.picks || []).map((x) => modelShort(x.modelId, conv) + (x.p == null ? '' : ' ' + Math.round(x.p * 100) + ' %'));
+    return bits.join(' · ') + (picks.length ? ' — ' + picks.join(' · ') : '');
+  }
+
+  function routeBar(conv, turn) {
+    const route = turn.route;
+    if (!route) return null;
+    const summary = routeSummary(conv, turn);
+    const ids = route.candidates || [];
+    return h('div', { class: 'route-bar', dataset: { route: turn.id } },
+      h('div', { class: 'route-line', title: summary + (route.note ? ' · ' + route.note : '') },
+        h('span', { class: 'route-summary' }, summary),
+        route.note ? h('span', { class: 'route-note muted' }, ' · ' + route.note) : null),
+      ids.length ? h('details', { class: 'route-candidates' }, h('summary', { class: 'muted small' }, `candidates (${ids.length})`),
+        h('ul', { class: 'small' }, ids.map((id) => h('li', {}, h('code', {}, id))))) : null);
+  }
+
   function turnActions(conv, turn) {
     const runner = app().state.runner;
     const answered = MC.conv.answeredLanes(turn).length;
@@ -226,6 +285,7 @@
   function turnEl(conv, turn, lanes) {
     return h('section', { class: 'turn', dataset: { turn: turn.id } },
       promptRow(conv, turn),
+      routeBar(conv, turn),
       h('div', { class: 'lanes grid', style: `--cols:${lanes.length}` }, lanes.map((l, i) => cell(conv, turn, l, i))),
       turnActions(conv, turn),
       h('div', { class: 'derived', dataset: { derived: turn.id } }, MC.ui.derived ? MC.ui.derived.render(conv, turn) : null));
@@ -289,6 +349,13 @@
         if (actions) actions.replaceWith(turnActions(conv, turn));
         const bar = root.querySelector('.lane-bar');
         if (bar) bar.replaceWith(laneBar(conv, lanes));
+        const routeEl = root.querySelector(`[data-route="${turnId}"]`);
+        if (routeEl) {
+          const next = routeBar(conv, turn);
+          const open = routeEl.querySelector('details[open]');
+          if (open && next.querySelector('details')) next.querySelector('details').open = true;
+          routeEl.replaceWith(next);
+        }
       }
       if (isMobile() && col !== view.activeCol) {
         view.unread.add(laneId);

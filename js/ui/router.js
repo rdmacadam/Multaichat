@@ -264,9 +264,76 @@
     openDialog(dlg);
   }
 
+  // ---------- preview (spec §6.4) ----------
+  // Shows the router's picks before sending. Resolves to
+  // { action: 'send', picks } | { action: 'selection' } | null (cancelled).
+  function preview(result) {
+    const dlg = document.getElementById('route-preview-dialog');
+    clear(dlg);
+    const route = result.route;
+    const pOf = new Map((route.picks || []).map((x) => [x.modelId, x.p]));
+    let picks = result.picks.slice();
+    // Native mode routes inside OpenRouter: there is nothing to add.
+    const pool = route.method === 'native' ? [] : (route.candidates || []).map((id) => app().modelById(id)).filter(Boolean);
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (value) => {
+        if (done) return;
+        done = true;
+        dlg.oncancel = null;
+        closeDialog(dlg);
+        resolve(value);
+      };
+      dlg.oncancel = (e) => { e.preventDefault(); finish(null); };
+      const chips = h('div', { class: 'pick-chips', role: 'list' });
+      const add = h('select', { class: 'pick-add', 'aria-label': 'Add from pool' });
+      const send = h('button', { type: 'button', class: 'primary', onclick: () => { if (picks.length) finish({ action: 'send', picks: picks.slice() }); } }, 'Send');
+      add.addEventListener('change', () => {
+        const m = pool.find((x) => x.id === add.value);
+        if (m && !picks.some((x) => x.id === m.id)) picks.push(m);
+        render();
+      });
+
+      function render() {
+        clear(chips);
+        for (const m of picks) {
+          const p = pOf.get(m.id);
+          chips.append(h('span', { class: 'chip pick-chip', role: 'listitem', dataset: { id: m.id }, title: m.id },
+            MC.dom.shortName(m.name),
+            p == null ? null : h('span', { class: 'muted small' }, ' ' + Math.round(p * 100) + ' %'),
+            h('button', { type: 'button', class: 'chip-x', 'aria-label': 'Remove ' + MC.dom.shortName(m.name),
+              onclick: () => { picks = picks.filter((x) => x !== m); render(); } }, '✕')));
+        }
+        if (!picks.length) chips.append(h('span', { class: 'muted small' }, 'No models picked — add one from the pool.'));
+        const rest = pool.filter((m) => !picks.some((x) => x.id === m.id));
+        clear(add);
+        append(add, [h('option', { value: '' }, '＋ Add from pool'), rest.map((m) => h('option', { value: m.id }, MC.dom.shortName(m.name)))]);
+        add.value = '';
+        add.hidden = !pool.length;
+        add.disabled = !rest.length;
+        send.disabled = !picks.length;
+      }
+
+      render();
+      dlg.append(h('div', { class: 'dialog-body route-preview' },
+        h('header', { class: 'dialog-head' }, h('h2', {}, '🧭 Router picks'),
+          h('button', { type: 'button', class: 'icon', 'aria-label': 'Close', onclick: () => finish(null) }, '✕')),
+        route.task ? h('p', { class: 'muted small route-task' }, 'task: ' + route.task) : null,
+        route.note ? h('p', { class: 'muted small' }, route.note) : null,
+        chips,
+        add,
+        h('footer', { class: 'dialog-foot' },
+          h('button', { type: 'button', class: 'ghost', onclick: () => finish(null) }, 'Cancel'),
+          h('button', { type: 'button', class: 'ghost', onclick: () => finish({ action: 'selection' }) }, 'Send to my selection instead'),
+          send)));
+      openDialog(dlg);
+      send.focus();
+    });
+  }
+
   // Re-renders the decision model list when the panel is open (e.g. after a refresh).
   function update() { if (view && view.dlg.open) view.deciders.render(); }
 
   MC.ui = MC.ui || {};
-  MC.ui.router = { open, label, placeholder, update };
+  MC.ui.router = { open, label, placeholder, update, preview };
 })(window.MC);

@@ -115,16 +115,20 @@
     const text = view.ta.value.trim();
     if ((!text && !view.files.length) || busy() || view.sending) return;
     if (!app().state.settings.getKey()) { toast('Add your OpenRouter API key first', 'warn'); MC.ui.settings.open(); return; }
-    if (view.files.length) {
+    // The router handles messages to everyone; a targeted message bypasses it.
+    const routed = !view.target && routerOn();
+    if (view.files.length || routed) {
       const target = view.target;
-      // Reading, the capability question and saving take a while before the
-      // runner is busy; block a second send meanwhile.
+      // Reading, routing, the capability question and saving take a while
+      // before the runner is busy; block a second send meanwhile.
       view.sending = true;
-      view.send.disabled = true;
+      update();
       let ok = false;
-      try { ok = await app().sendWithAttachments(text, view.files.slice(), target); } finally {
+      try {
+        ok = routed ? await app().sendRouted(text, view.files.slice()) : await app().sendWithAttachments(text, view.files.slice(), target);
+      } finally {
         view.sending = false;
-        view.send.disabled = false;
+        update();
       }
       if (!ok) return; // keep text and chips
       view.files = [];
@@ -146,6 +150,14 @@
     update();
   }
 
+  function routing() { return !!(app().isRouting && app().isRouting()); }
+
+  // Stop: aborts the routing decision, or else all answers.
+  function stop() {
+    if (routing()) app().abortRoute();
+    else app().state.runner.stopAll();
+  }
+
   function askingLanes() {
     const conv = app().state.conv;
     if (!conv || !conv.turns.length) return [];
@@ -157,8 +169,12 @@
   function update() {
     if (!view.ta) return;
     const b = busy();
+    const r = routing();
     view.send.hidden = b;
-    view.stop.hidden = !b;
+    view.send.disabled = !!view.sending;
+    view.send.textContent = r ? '🧭 routing…' : 'Send';
+    view.stop.hidden = !b && !r;
+    view.stop.textContent = r && !b ? '■ Stop' : '■ Stop all';
     if (view.target && !(lane(view.target) || {}).active) { view.target = null; renderChip(); }
     renderRouterChip();
     const asking = b ? [] : askingLanes();
@@ -231,11 +247,11 @@
       if (e.key === 'Escape') {
         // First Esc clears the "one model" target; with no target it stops all answers.
         if (view.target) setTarget(null);
-        else if (busy()) app().state.runner.stopAll();
+        else if (busy() || routing()) stop();
       }
     });
     view.send = h('button', { class: 'primary', onclick: submit, 'aria-label': 'Send' }, 'Send');
-    view.stop = h('button', { class: 'danger', hidden: true, onclick: () => app().state.runner.stopAll() }, '■ Stop all');
+    view.stop = h('button', { class: 'danger', hidden: true, onclick: stop }, '■ Stop all');
     view.tray = h('div', { class: 'att-tray', hidden: true });
     const input = h('input', { type: 'file', class: 'attach-input', multiple: true, hidden: true,
       accept: 'image/png,image/jpeg,image/webp,image/gif,application/pdf,text/*,' + MC.attach.TEXT_EXT.map((x) => '.' + x).join(',') });

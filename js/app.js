@@ -3,7 +3,7 @@
   'use strict';
   const { h, clear, toast, shortName, isTyping } = MC.dom;
 
-  const state = { settings: null, store: null, models: [], modelsInfo: null, deciders: [], metas: [], conv: null, runner: null, presets: null,
+  const state = { settings: null, store: null, models: [], modelsInfo: null, deciders: [], metas: [], conv: null, runner: null, presets: null, routing: null,
     draft: {} }; // draft: system prompt chosen before the chat's first message
   const deleted = new Set(); // ids deleted while a request for them may still be in flight
 
@@ -210,19 +210,38 @@
     return p;
   }
 
+  // Validates and reads files; null (after a toast) when they can't be sent.
+  async function readAttachments(files) {
+    const check = MC.attach.validate(files);
+    if (!check.ok) { toast(check.error, 'warn'); return null; }
+    let read;
+    try { read = await Promise.all(files.map((f) => MC.files.read(f))); } catch (e) { toast(e.message, 'error'); return null; }
+    return { refs: read.map((r) => r.ref), read };
+  }
+
+  async function storeAttachments(read) {
+    try {
+      for (const r of read) await state.store.putAttachment(r.record);
+      return true;
+    } catch (e) {
+      toast('Could not save attachment: ' + e.message, 'error');
+      return false;
+    }
+  }
+
+  const textContentsOf = (read) => Object.fromEntries(read.filter((r) => r.ref.kind === 'text').map((r) => [r.ref.id, r.text]));
+
   // Sends a message with attachments to every active lane (or one target lane).
   // Resolves false (composer keeps its content) when cancelled or on errors.
   async function sendWithAttachments(text, files, targetLaneId) {
     if (blockedByBusy()) return false;
     if (!cfg().selected.length && !state.conv) { toast('Pick at least one model first', 'warn'); openModelPicker(); return false; }
-    const check = MC.attach.validate(files);
-    if (!check.ok) { toast(check.error, 'warn'); return false; }
-    let read;
-    try { read = await Promise.all(files.map((f) => MC.files.read(f))); } catch (e) { toast(e.message, 'error'); return false; }
+    const att = await readAttachments(files);
+    if (!att) return false;
+    const { refs, read } = att;
     const conv = ensureConv();
     const lanes = conv.lanes.filter((l) => l.active && (!targetLaneId || l.id === targetLaneId));
     if (!lanes.length) { toast('All models were removed — add one first', 'warn'); return false; }
-    const refs = read.map((r) => r.ref);
     const byId = Object.fromEntries(state.models.map((m) => [m.id, m]));
     const incapableIds = refs.some((r) => r.kind === 'image') ? MC.attach.incapable(lanes, byId) : [];
     let choice = null;
@@ -236,18 +255,93 @@
         if (answer.remember) conv.attachPolicy = choice;
       }
     }
-    try {
-      for (const r of read) await state.store.putAttachment(r.record);
-    } catch (e) {
-      toast('Could not save attachment: ' + e.message, 'error');
-      return false;
-    }
-    const textContents = Object.fromEntries(read.filter((r) => r.ref.kind === 'text').map((r) => [r.ref.id, r.text]));
+    if (!await storeAttachments(read)) return false;
+    const textContents = textContentsOf(read);
     const { inputs, delivery, skipped } = MC.attach.buildInputs({ text, refs, textContents, laneIds: lanes.map((l) => l.id), incapableIds, choice });
     if (!Object.keys(inputs).length) { toast('None of the selected models can read images', 'warn'); return false; }
     const p = sendTurn(targetLaneId ? 'targeted' : 'broadcast', inputs, { attachments: refs, delivery, skipped });
     refresh();
     p.catch(() => {});
+    return true;
+  }
+
+  // ---------- routed sending (spec §5.9) ----------
+  const CONTEXT_INPUTS = 3;
+  const CONTEXT_CHARS = 300;
+
+  // What the decision model learns about the chat so far: the last turn's
+  // TL;DR, or else the last few user messages (each cut short).
+  function contextNote(conv) {
+    if (!conv || !conv.turns.length) return undefined;
+    const last = conv.turns[conv.turns.length - 1];
+    if (last.tldr && last.tldr.status === 'done' && last.tldr.content) return last.tldr.content;
+    const lines = conv.turns.slice(-CONTEXT_INPUTS)
+      .map((t) => String(Object.values(t.inputs)[0] || '').trim()).filter(Boolean)
+      .map((s) => 'User: ' + (s.length > CONTEXT_CHARS ? s.slice(0, CONTEXT_CHARS) + '…' : s));
+    return lines.length ? lines.join('\n') : undefined;
+  }
+
+  function isRouting() { return !!state.routing; }
+
+  function abortRoute() { if (state.routing) state.routing.abort(); }
+
+  // Lets the router pick the models for this message, then sends it to them.
+  // Resolves false (composer keeps its content) when stopped, cancelled or on errors.
+  async function sendRouted(text, files = []) {
+    if (blockedByBusy() || state.routing) return false;
+    let att = { refs: [], read: [] };
+    if (files.length) { att = await readAttachments(files); if (!att) return false; }
+    const { refs, read } = att;
+    const images = Object.fromEntries(read.filter((r) => r.ref.kind === 'image').map((r) => [r.ref.id, r.record.data]));
+    const textContents = textContentsOf(read);
+    const c = cfg();
+    const ctrl = new AbortController();
+    state.routing = ctrl;
+    MC.ui.composer.update();
+    let result;
+    try {
+      result = await state.runner.route({
+        text, attachments: refs, images, textContents,
+        settings: MC.router.withDefaults(c.router),
+        models: state.models, deciders: state.deciders, starred: c.starredDeciders,
+        selection: currentModelIds().filter((id) => id !== MC.router.NATIVE_ID),
+        filters: c.pickerFilters,
+        systemPrompt: promptHolder().systemPrompt,
+        contextNote: contextNote(state.conv),
+        signal: ctrl.signal,
+      });
+    } catch (e) {
+      result = { ok: false, reason: 'error', message: e.message || 'Routing failed' };
+    } finally {
+      state.routing = null;
+      MC.ui.composer.update();
+    }
+    if (!result.ok) {
+      if (result.reason !== 'aborted') toast(result.message, result.reason === 'empty' ? 'warn' : 'error');
+      return false;
+    }
+    let { route, picks } = result;
+    if (MC.router.withDefaults(c.router).preview) {
+      const choice = await MC.ui.router.preview(result);
+      if (!choice) return false;
+      if (choice.action === 'selection') {
+        if (files.length) return sendWithAttachments(text, files);
+        sendBroadcast(text);
+        return true;
+      }
+      picks = choice.picks;
+      const pOf = new Map(route.picks.map((x) => [x.modelId, x.p]));
+      route = Object.assign({}, route, { picks: picks.map((m) => ({ modelId: m.id, p: pOf.has(m.id) ? pOf.get(m.id) : null })) });
+    }
+    if (blockedByBusy()) return false;
+    const conv = ensureConv();
+    const laneIds = MC.conv.ensureLanes(conv, picks.map((m) => ({ id: m.id, name: m.name })));
+    if (!await storeAttachments(read)) return false;
+    // Image capability was enforced by the pool: no lane is "incapable".
+    const { inputs, delivery } = MC.attach.buildInputs({ text, refs, textContents, laneIds, incapableIds: [], choice: null });
+    const p = sendTurn('broadcast', inputs, { attachments: refs, delivery, route });
+    refresh();
+    if (p) p.catch(() => {});
     return true;
   }
 
@@ -336,7 +430,10 @@
       if ((k === 'k' || k === 'K') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); openModelPicker(); return; }
       if (k === '/' && !isTyping(document.activeElement) && !document.querySelector('dialog[open]')) { e.preventDefault(); openModelPicker(); return; }
       if (e.altKey && /^[1-9]$/.test(k) && state.conv) { e.preventDefault(); MC.ui.chat.focusLane(Number(k) - 1); }
-      if (k === 'Escape' && state.runner.isBusy() && !isTyping(e.target) && !document.querySelector('dialog[open]')) state.runner.stopAll();
+      if (k === 'Escape' && !isTyping(e.target) && !document.querySelector('dialog[open]')) {
+        if (state.routing) abortRoute();
+        else if (state.runner.isBusy()) state.runner.stopAll();
+      }
     });
     document.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-copy]');
@@ -376,6 +473,7 @@
     state, start, refresh, modelById, refreshModels, refreshDeciders, openModelPicker, setSelection, addModel, removeModel,
     sendBroadcast, sendTargeted, sendBatch, openConversation, newChat, deleteConversation, renameConversation,
     importConversations, forkAt, save, ensureConv, applyPreset, setChatSystemPrompt, promptHolder, sendWithAttachments, updateCost,
+    sendRouted, abortRoute, isRouting, currentModelIds,
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

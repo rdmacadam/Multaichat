@@ -305,3 +305,16 @@ dialog::backdrop { background: rgba(0,0,0,.35); }
   #topbar { gap: 6px; padding: 8px; overflow-x: auto; scrollbar-width: none; }
   #topbar > button.ghost { padding: 5px 8px; flex: none; }
 }
+/* routed turns: route bar, "not routed" cells, native "answered by", preview */
+.route-bar { font-size: 13px; color: var(--muted); background: var(--panel-2); border-radius: 6px; padding: 4px 10px; min-width: 0; }
+.route-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.route-summary { color: var(--text); }
+.route-note { font-style: italic; }
+.route-candidates summary { cursor: pointer; }
+.route-candidates ul { margin: 4px 0 2px; padding-left: 18px; columns: 2 220px; overflow-wrap: anywhere; }
+.cell.not-routed { opacity: .75; }
+.served { font-style: italic; }
+#route-preview-dialog { width: min(520px, calc(100vw - 24px)); }
+.route-preview .pick-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.route-preview .pick-add { max-width: 100%; }
+.route-preview .dialog-foot { flex-wrap: wrap; }

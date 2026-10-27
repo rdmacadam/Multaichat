@@ -34,7 +34,7 @@ const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers
 // opts.delay: ms before each chat response; opts.failModels: true makes /models fail;
 // opts.requests: array that receives every chat request body.
 // opts.noDeciders: the decisions list is empty; opts.decisions: array that receives every decision body;
-// opts.decideStatus: {modelId: httpStatus} makes that decision model fail.
+// opts.decideStatus: {modelId: httpStatus} makes that decision model fail; opts.decideDelay: ms before each decision answer.
 // Default decision answer: pick = labels in criteria order with halving probabilities, task = chat,
 // best = last label at 0.7.
 function decisionAnswer(body) {
@@ -61,9 +61,12 @@ async function mockOpenRouter(page, opts = {}) {
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
     const body = JSON.parse(req.postData() || '{}');
     if (opts.decisions) opts.decisions.push(body);
+    if (opts.decideDelay) await new Promise((r) => setTimeout(r, opts.decideDelay));
     const status = opts.decideStatus && opts.decideStatus[body.model];
-    if (status) return route.fulfill({ status, headers: CORS, contentType: 'application/json', body: JSON.stringify({ error: { code: status, message: 'decision failed' } }) });
-    return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(decisionAnswer(body)) });
+    // The page may have aborted the request meanwhile (Stop while routing).
+    const done = () => {};
+    if (status) return route.fulfill({ status, headers: CORS, contentType: 'application/json', body: JSON.stringify({ error: { code: status, message: 'decision failed' } }) }).catch(done);
+    return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(decisionAnswer(body)) }).catch(done);
   });
   await page.route('https://openrouter.ai/api/v1/**', async (route) => {
     const req = route.request();

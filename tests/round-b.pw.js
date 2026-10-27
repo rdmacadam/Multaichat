@@ -35,6 +35,12 @@ const allDone = (page, turns) => page.waitForFunction((n) => document.querySelec
   !document.querySelector('.cell.status-streaming'), turns);
 const costText = async (page) => (await page.textContent('#cost')).trim();
 const tip = (page) => page.locator('.cost-wrap .tip');
+const PNG = { name: 'tiny.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64') };
+// Models of the chat (streamed) requests sent so far.
+const chatModels = (page) => page.requests.filter((r) => r.stream).map((r) => r.model);
+const convInfo = (page) => page.evaluate(() => ({ active: MC.app.state.conv.lanes.filter((l) => l.active).map((l) => l.modelId) }));
+// localStorage seed for router settings (and other settings).
+const routerInit = (router, extra) => ({ 'mc.settings': JSON.stringify(Object.assign({ router: Object.assign({ enabled: true }, router) }, extra)) });
 
 const cases = {
   async 'cost counter sums the answers and survives reload'(page) {
@@ -244,8 +250,241 @@ const cases = {
     assert.ok(over.scroll <= 1, 'no horizontal scroll inside the panel: ' + over.scroll);
     assert.ok(over.right <= 0, 'panel inside the viewport');
   },
+  // ---------- routed sending (Task 9) ----------
+
+  async 'auto mode routes to the top N and shows the route bar'(page) {
+    await ask(page, 'Plan a trip');
+    await allDone(page, 1);
+    assert.equal(page.decisions.length, 1);
+    assert.equal(page.decisions[0].model, 'perplexity/pplx-decider-v1.2');
+    const ranked = Object.keys(page.decisions[0].questions.pick.criteria);
+    const want = ranked.slice(0, 2);
+    assert.deepEqual(chatModels(page).sort(), want.slice().sort());
+    assert.equal(await page.locator('.turn .cell.status-done').count(), 2);
+    const conv = await convInfo(page);
+    const unpicked = conv.active.filter((id) => !want.includes(id));
+    assert.equal(await page.locator('.turn .cell.not-routed').count(), unpicked.length);
+    if (unpicked.length) assert.equal((await page.locator('.turn .cell.not-routed').first().textContent()).trim(), '— not routed this turn');
+    // the toolbar shows the picked models as active lanes
+    for (const id of want) assert.ok(conv.active.includes(id), id + ' joined the chat');
+    const bar = page.locator('.turn .route-bar');
+    assert.equal(await bar.count(), 1);
+    const text = await bar.textContent();
+    assert.match(text, /🧭 Full auto/);
+    assert.match(text, /Decider V1\.2/);
+    assert.match(text, /task: chat/);
+    assert.match(text, /\d\.\d s/);
+    assert.match(text, / 50 %/);
+    assert.match(text, /candidates \(\d+\)/);
+    // the bar sits above the answers
+    assert.equal(await page.evaluate(() => document.querySelector('.turn .route-bar').nextElementSibling.classList.contains('lanes')), true);
+    // the route is stored with the turn
+    const route = await page.evaluate(() => MC.app.state.conv.turns[0].route);
+    assert.equal(route.method, 'model');
+    assert.deepEqual(route.picks.map((p) => p.modelId), want);
+    // the composer is cleared
+    assert.equal(await page.inputValue('#prompt'), '');
+  },
+
+  async 'an image is never routed to a model without image input'(page) {
+    await page.setInputFiles('#composer input.attach-input', PNG);
+    await ask(page, 'What is this?');
+    await allDone(page, 1);
+    assert.equal(await page.locator('#attach-dialog').isVisible(), false, 'no capability dialog');
+    const imageIds = ['anthropic/claude-sonnet-5', 'openai/gpt-6', 'google/gemini-3-pro', 'meta-llama/llama-5-405b'];
+    const models = chatModels(page);
+    assert.equal(models.length, 3);
+    for (const m of models) assert.ok(imageIds.includes(m), m + ' reads images');
+    for (const id of Object.keys(page.decisions[0].questions.pick.criteria)) assert.ok(imageIds.includes(id), id);
+    // the image reached the decider and the answering models
+    assert.ok(page.decisions[0].state.some((p) => p && p.type === 'image_url'));
+    for (const b of page.requests.filter((r) => r.stream)) {
+      const last = b.messages[b.messages.length - 1];
+      assert.ok(Array.isArray(last.content) && last.content.some((p) => p.type === 'image_url'), 'image sent to ' + b.model);
+    }
+    assert.equal(await page.locator('.turn .att-thumb').count(), 1);
+    assert.equal(await page.locator('#composer .att-chip').count(), 0, 'tray cleared');
+  },
+
+  async 'picker filters restrict the decision candidates'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    const ids = Object.keys(page.decisions[0].questions.pick.criteria).sort();
+    assert.deepEqual(ids, ['anthropic/claude-sonnet-5', 'google/gemini-3-pro']);
+    assert.match(await page.textContent('.route-bar'), /only 2 models fit \(filters\)/);
+  },
+
+  async 'selection pool only offers the toolbar models'(page) {
+    const selected = await page.evaluate(() => MC.app.state.settings.get().selected);
+    await ask(page);
+    await allDone(page, 1);
+    assert.deepEqual(Object.keys(page.decisions[0].questions.pick.criteria).sort(), selected.slice().sort());
+    for (const m of chatModels(page)) assert.ok(selected.includes(m));
+  },
+
+  async 'diverse mode picks distinct providers'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    assert.match(page.decisions[0].questions.pick.instructions, /different perspectives/);
+    const models = chatModels(page);
+    assert.equal(models.length, 3);
+    assert.equal(new Set(models.map((m) => m.split('/')[0])).size, 3);
+    assert.match(await page.textContent('.route-bar'), /🧭 Diverse perspectives/);
+  },
+
+  async 'best free without free deciders uses rules and makes no decision request'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    assert.equal(page.decisions.length, 0);
+    const models = chatModels(page);
+    assert.equal(models.length, 2);
+    const free = await page.evaluate((ids) => ids.map((id) => MC.app.modelById(id).free), models);
+    assert.deepEqual(free, [true, true]);
+    const text = await page.textContent('.route-bar');
+    assert.match(text, /🧭 Best free · picked by rules/);
+    assert.match(text, /no free decision model available/);
+  },
+
+  async 'decision 429 falls back to the next starred decider, then rules with a note'(page, opts) {
+    await ask(page, 'first');
+    await allDone(page, 1);
+    assert.deepEqual(page.decisions.map((d) => d.model), ['perplexity/pplx-decider-v1.2', 'liquid/d1-ultra']);
+    let bar = await page.locator('.route-bar').last().textContent();
+    assert.match(bar, /d1-ultra/);
+    assert.equal(chatModels(page).length, 2);
+    opts.decideStatus['liquid/d1-ultra'] = 500;
+    await ask(page, 'second');
+    await allDone(page, 2);
+    assert.equal(page.decisions.length, 4, 'two more tries, no third decider');
+    bar = await page.locator('.route-bar').last().textContent();
+    assert.match(bar, /picked by rules/);
+    assert.match(bar, /decision failed/);
+    assert.equal(await page.evaluate(() => MC.app.state.conv.turns[1].route.method), 'rules');
+  },
+
+  async 'preview: remove a pick, cancel keeps the text, send uses the edited picks'(page) {
+    await ask(page, 'Preview me');
+    const dlg = page.locator('#route-preview-dialog');
+    await dlg.waitFor({ state: 'visible' });
+    assert.equal(await dlg.locator('.pick-chip').count(), 3);
+    assert.match(await dlg.locator('.pick-chip').first().textContent(), /50 %/);
+    await dlg.locator('.pick-chip .chip-x').first().click();
+    assert.equal(await dlg.locator('.pick-chip').count(), 2);
+    await dlg.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await dlg.waitFor({ state: 'hidden' });
+    assert.equal(await page.inputValue('#prompt'), 'Preview me');
+    assert.equal(chatModels(page).length, 0);
+    assert.equal(await page.locator('.turn').count(), 0);
+
+    // again: remove all picks → Send disabled; add one from the pool; send
+    await page.press('#prompt', 'Enter');
+    await dlg.waitFor({ state: 'visible' });
+    const first = await dlg.locator('.pick-chip').first().getAttribute('data-id');
+    while (await dlg.locator('.pick-chip').count()) await dlg.locator('.pick-chip .chip-x').first().click();
+    assert.equal(await dlg.getByRole('button', { name: 'Send', exact: true }).isDisabled(), true);
+    const add = dlg.locator('select.pick-add');
+    const options = await add.locator('option').evaluateAll((os) => os.map((o) => o.value).filter(Boolean));
+    assert.ok(options.includes(first), 'removed picks return to the pool: ' + first + ' in ' + options.join(','));
+    const other = options.find((v) => v !== first);
+    await add.selectOption(first);
+    await add.selectOption(other);
+    assert.equal(await dlg.locator('.pick-chip').count(), 2);
+    await dlg.getByRole('button', { name: 'Send', exact: true }).click();
+    await allDone(page, 1);
+    assert.deepEqual(chatModels(page).sort(), [first, other].sort());
+    const route = await page.evaluate(() => MC.app.state.conv.turns[0].route);
+    assert.deepEqual(route.picks.map((p) => p.modelId), [first, other]);
+    assert.equal(await page.inputValue('#prompt'), '');
+
+    // "Send to my selection instead" sends to the toolbar models without routing
+    const before = page.decisions.length;
+    await ask(page, 'All of you');
+    await dlg.waitFor({ state: 'visible' });
+    await dlg.getByRole('button', { name: 'Send to my selection instead' }).click();
+    await allDone(page, 2);
+    assert.equal(page.decisions.length, before + 1);
+    const t = await page.evaluate(() => { const c = MC.app.state.conv; const t = c.turns[1]; return { route: !!t.route, n: Object.keys(t.inputs).length, active: c.lanes.filter((l) => l.active).length }; });
+    assert.equal(t.route, false);
+    assert.equal(t.n, t.active);
+  },
+
+  async 'native mode sends openrouter/auto with allowed_models and session_id; shows answered by'(page) {
+    const selected = await page.evaluate(() => MC.app.state.settings.get().selected);
+    await ask(page);
+    await allDone(page, 1);
+    assert.equal(page.decisions.length, 0);
+    let chat = page.requests.filter((r) => r.stream);
+    assert.equal(chat.length, 1);
+    const convId = await page.evaluate(() => MC.app.state.conv.id);
+    assert.equal(chat[0].model, 'openrouter/auto');
+    assert.equal(chat[0].session_id, convId);
+    const plugin = chat[0].plugins.find((p) => p.id === 'auto-router');
+    assert.deepEqual(plugin.allowed_models.slice().sort(), selected.slice().sort());
+    const lane = await page.evaluate(() => MC.app.state.conv.lanes.find((l) => l.modelId === 'openrouter/auto'));
+    assert.equal(lane.modelName, 'OpenRouter Auto');
+    assert.equal((await page.textContent('.cell.status-done .served')).trim(), '→ answered by GPT-6');
+    assert.equal(await page.locator('.turn .cell.not-routed').count(), selected.length);
+    assert.match(await page.textContent('.route-bar'), /🧭 OpenRouter Auto · answered by GPT-6/);
+    // a second message: the native lane is not part of the pool
+    await ask(page, 'again');
+    await allDone(page, 2);
+    chat = page.requests.filter((r) => r.stream);
+    assert.equal(chat.length, 2);
+    assert.deepEqual(chat[1].plugins.find((p) => p.id === 'auto-router').allowed_models.slice().sort(), selected.slice().sort());
+  },
+
+  async 'targeted reply bypasses the router'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    assert.equal(page.decisions.length, 1);
+    await page.locator('.turn .cell.status-done').first().getByRole('button', { name: '↳ Reply' }).click();
+    await ask(page, 'just you');
+    await allDone(page, 2);
+    assert.equal(page.decisions.length, 1, 'no new decision');
+    const t = await page.evaluate(() => MC.app.state.conv.turns[1]);
+    assert.equal(t.kind, 'targeted');
+    assert.equal(t.route, undefined);
+    assert.equal(await page.locator('.turn').last().locator('.route-bar').count(), 0);
+  },
+
+  async 'Stop while routing sends nothing and keeps the text'(page) {
+    await ask(page, 'Keep me');
+    await page.waitForFunction(() => /🧭 routing…/.test(document.querySelector('#composer').textContent));
+    const stop = page.locator('#composer button.danger');
+    assert.equal(await stop.isVisible(), true, 'Stop is offered while routing');
+    await page.focus('#prompt');
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !/🧭 routing…/.test(document.querySelector('#composer').textContent));
+    await page.waitForTimeout(2300);
+    assert.equal(await page.inputValue('#prompt'), 'Keep me');
+    assert.equal(chatModels(page).length, 0);
+    assert.equal(await page.locator('.turn').count(), 0);
+    assert.equal(await page.locator('.toast').count(), 0, 'no toast for a stop');
+    // the Stop button aborts too
+    await page.press('#prompt', 'Enter');
+    await page.waitForFunction(() => /🧭 routing…/.test(document.querySelector('#composer').textContent));
+    await stop.click();
+    await page.waitForFunction(() => !/🧭 routing…/.test(document.querySelector('#composer').textContent));
+    assert.equal(await page.inputValue('#prompt'), 'Keep me');
+    assert.equal(await page.locator('.turn').count(), 0);
+  },
+
 };
 cases['starred deciders missing from the catalog are greyed'].opts = { noDeciders: true };
+cases['auto mode routes to the top N and shows the route bar'].init = routerInit({ mode: 'auto', count: 2, pool: 'catalog' });
+cases['an image is never routed to a model without image input'].init = routerInit({ mode: 'auto', count: 3, pool: 'catalog' });
+cases['picker filters restrict the decision candidates'].init = routerInit({ mode: 'auto', count: 3 }, { pickerFilters: { maxIn: '', maxOut: '', minContext: '', images: false, files: true } });
+cases['selection pool only offers the toolbar models'].init = routerInit({ mode: 'auto', count: 2, pool: 'selection' });
+cases['diverse mode picks distinct providers'].init = routerInit({ mode: 'diverse', count: 3 });
+cases['best free without free deciders uses rules and makes no decision request'].init = routerInit({ mode: 'free', count: 2 });
+cases['best free without free deciders uses rules and makes no decision request'].opts = { noDeciders: true };
+cases['decision 429 falls back to the next starred decider, then rules with a note'].init = routerInit({ mode: 'auto', count: 2 });
+cases['decision 429 falls back to the next starred decider, then rules with a note'].opts = { decideStatus: { 'perplexity/pplx-decider-v1.2': 429 } };
+cases['preview: remove a pick, cancel keeps the text, send uses the edited picks'].init = routerInit({ mode: 'auto', count: 3, preview: true });
+cases['native mode sends openrouter/auto with allowed_models and session_id; shows answered by'].init = routerInit({ mode: 'native', pool: 'selection' });
+cases['targeted reply bypasses the router'].init = routerInit({ mode: 'auto', count: 2 });
+cases['Stop while routing sends nothing and keeps the text'].init = routerInit({ mode: 'auto', count: 2 });
+cases['Stop while routing sends nothing and keeps the text'].opts = { decideDelay: 2000 };
 
 (async () => {
   const browser = await chromium.launch();
@@ -258,7 +497,7 @@ cases['starred deciders missing from the catalog are greyed'].opts = { noDecider
     let page;
     try {
       page = await open(browser, fn.opts || {}, fn.init);
-      await fn(page);
+      await fn(page, fn.opts);
       assert.deepEqual(page.errors, [], 'no page errors');
       console.log('ok - ' + name);
     } catch (e) {
