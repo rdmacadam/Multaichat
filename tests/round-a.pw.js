@@ -324,9 +324,9 @@ const cases = {
     await page.waitForSelector('.turn .att-thumb img[src^="blob:"]');
     const before = page.requests.length;
     await laneCell(page, 0, 0).locator('button:has-text("Retry")').click();
-    await page.waitForFunction((n) => !document.querySelector('.cell.status-streaming'), before);
+    for (let i = 0; i < 100 && page.requests.length <= before; i++) await page.waitForTimeout(50);
+    assert.ok(page.requests.length > before, 'retry sent a request');
     const again = page.requests[page.requests.length - 1];
-    assert.ok(page.requests.length > before);
     assert.equal(lastUser(again).content[1].type, 'image_url');
   },
 
