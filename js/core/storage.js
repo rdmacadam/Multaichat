@@ -10,6 +10,7 @@
   const K_SETTINGS = 'mc.settings';
   const K_KEY = 'mc.apiKey';
   const K_CONVS = 'mc.conversations';
+  const K_ATTACH = 'mc.attachments';
 
   const DEFAULT_SETTINGS = Object.freeze({
     selected: [],
@@ -96,17 +97,41 @@
 
   function byUpdatedDesc(a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }
 
+  function refsOf(conv) {
+    const ids = new Set();
+    for (const t of (conv && conv.turns) || []) for (const a of t.attachments || []) ids.add(a.id);
+    return [...ids];
+  }
+
+  // Shared by every store kind: delete a conversation and the attachments only
+  // it referenced (forks share attachment records with their parent).
+  function withAttachmentHelpers(store) {
+    store.attachmentsFor = async (ids) => (await Promise.all(ids.map((id) => store.getAttachment(id)))).filter(Boolean);
+    store.deleteConversation = async (id) => {
+      const conv = await store.get(id);
+      await store.delete(id);
+      const refs = refsOf(conv);
+      if (!refs.length) return;
+      const used = new Set((await store.all()).flatMap(refsOf));
+      for (const r of refs) if (!used.has(r)) await store.deleteAttachment(r);
+    };
+    return store;
+  }
+
   function localStore(ls, kind = 'local') {
-    const read = () => readJson(ls, K_CONVS, {}) || {};
-    const write = (all) => ls.setItem(K_CONVS, JSON.stringify(all)); // throws on quota so callers can report it
-    return {
+    const read = (key = K_CONVS) => readJson(ls, key, {}) || {};
+    const write = (all, key = K_CONVS) => ls.setItem(key, JSON.stringify(all)); // throws on quota so callers can report it
+    return withAttachmentHelpers({
       kind,
       async list() { return Object.values(read()).map(meta).sort(byUpdatedDesc); },
       async get(id) { return read()[id]; },
       async put(conv) { const all = read(); all[conv.id] = conv; write(all); },
       async delete(id) { const all = read(); delete all[id]; write(all); },
       async all() { return Object.values(read()); },
-    };
+      async getAttachment(id) { return read(K_ATTACH)[id]; },
+      async putAttachment(rec) { const all = read(K_ATTACH); all[rec.id] = rec; write(all, K_ATTACH); },
+      async deleteAttachment(id) { const all = read(K_ATTACH); delete all[id]; write(all, K_ATTACH); },
+    });
   }
 
   function idbRequest(req) {
@@ -117,37 +142,49 @@
   }
 
   function idbStore(db) {
-    const tx = (mode) => db.transaction('conversations', mode).objectStore('conversations');
-    return {
+    const tx = (mode, name = 'conversations') => db.transaction(name, mode).objectStore(name);
+    return withAttachmentHelpers({
       kind: 'idb',
+      async getAttachment(id) { return idbRequest(tx('readonly', 'attachments').get(id)); },
+      async putAttachment(rec) { await idbRequest(tx('readwrite', 'attachments').put(rec)); },
+      async deleteAttachment(id) { await idbRequest(tx('readwrite', 'attachments').delete(id)); },
       async list() { return (await idbRequest(tx('readonly').getAll())).map(meta).sort(byUpdatedDesc); },
       async get(id) { return idbRequest(tx('readonly').get(id)); },
       async put(conv) { await idbRequest(tx('readwrite').put(conv)); },
       async delete(id) { await idbRequest(tx('readwrite').delete(id)); },
       async all() { return idbRequest(tx('readonly').getAll()); },
-    };
+    });
   }
 
-  function openIdb(idb) {
+  // onBlocked: called when another tab still holds the old version open; the
+  // upgrade then waits for that tab instead of failing.
+  function openIdb(idb, onBlocked) {
     return new Promise((resolve, reject) => {
       let req;
-      try { req = idb.open('multaichat', 1); } catch (e) { reject(e); return; }
+      // Version 2 adds the attachments store; existing conversations are untouched.
+      try { req = idb.open('multaichat', 2); } catch (e) { reject(e); return; }
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains('conversations')) {
           const os = db.createObjectStore('conversations', { keyPath: 'id' });
           os.createIndex('updatedAt', 'updatedAt');
         }
+        if (!db.objectStoreNames.contains('attachments')) db.createObjectStore('attachments', { keyPath: 'id' });
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const db = req.result;
+        // Let a newer version of the app in another tab upgrade the database.
+        db.onversionchange = () => db.close();
+        resolve(db);
+      };
       req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
-      req.onblocked = () => reject(new Error('IndexedDB blocked'));
+      req.onblocked = () => { if (onBlocked) onBlocked(); };
     });
   }
 
-  async function openStore({ idb = safeGlobal('indexedDB'), ls = safeGlobal('localStorage') } = {}) {
+  async function openStore({ idb = safeGlobal('indexedDB'), ls = safeGlobal('localStorage'), onBlocked } = {}) {
     if (idb) {
-      try { return idbStore(await openIdb(idb)); } catch (e) { /* fall through */ }
+      try { return idbStore(await openIdb(idb, onBlocked)); } catch (e) { /* fall through */ }
     }
     return ls ? localStore(ls) : localStore(memoryLs(), 'memory');
   }
@@ -158,14 +195,24 @@
     return JSON.stringify({ app: 'multaichat', version: 2, exportedAt: Date.now(), conversations: convs, attachments, presets }, null, 2);
   }
 
-  function importJson(text, existing) {
+  // Reads a v1 or v2 export.
+  function parseImport(text) {
     let obj;
     try { obj = JSON.parse(text); } catch (e) { obj = null; }
     if (!obj || obj.app !== 'multaichat' || !Array.isArray(obj.conversations)) {
       throw new Error('Not a Multaichat export');
     }
+    return {
+      conversations: obj.conversations,
+      attachments: Array.isArray(obj.attachments) ? obj.attachments.filter((a) => a && a.id) : [],
+      presets: Array.isArray(obj.presets) ? obj.presets : [],
+    };
+  }
+
+  function importJson(text, existing) {
+    const { conversations } = parseImport(text);
     const map = new Map((existing || []).map((c) => [c.id, c]));
-    for (const c of obj.conversations) {
+    for (const c of conversations) {
       if (!c || !c.id) continue;
       const cur = map.get(c.id);
       if (!cur || (c.updatedAt || 0) > (cur.updatedAt || 0)) map.set(c.id, c);
@@ -173,5 +220,5 @@
     return [...map.values()];
   }
 
-  return { DEFAULT_SETTINGS, normalizeKey, createSettings, defaultLs, openStore, exportJson, importJson };
+  return { DEFAULT_SETTINGS, normalizeKey, createSettings, defaultLs, openStore, refsOf, exportJson, parseImport, importJson };
 });

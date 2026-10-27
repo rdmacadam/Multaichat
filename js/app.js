@@ -259,7 +259,9 @@
     state.settings = MC.storage.createSettings();
     state.presets = MC.presets.createPresetStore(MC.storage.defaultLs());
     MC.ui.settings.applyTheme(cfg().theme);
-    state.store = await MC.storage.openStore();
+    state.store = await MC.storage.openStore({
+      onBlocked: () => toast('Updating saved chats — close other Multaichat tabs to continue', 'warn', 15000),
+    });
     if (state.store.kind === 'local') toast('Browser database unavailable — history stored in limited local storage', 'warn', 8000);
     state.runner = MC.runner.createRunner({ getKey: () => state.settings.getKey(), save, onChange });
     bindGlobalKeys();

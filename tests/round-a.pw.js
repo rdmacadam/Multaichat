@@ -34,6 +34,32 @@ const allDone = (page, turns) => page.waitForFunction((n) => document.querySelec
 const openPicker = async (page) => { await page.keyboard.press('Control+k'); await page.waitForSelector('#picker-dialog[open] .picker-search'); };
 const openPresets = async (page) => { await page.click('#topbar button:has-text("Presets")'); await page.waitForSelector('#presets-dialog[open]'); };
 const applyPresetNamed = (page, name) => page.locator('#presets-dialog .preset-row', { hasText: name }).locator('button:has-text("Apply")').click();
+// Creates a version-1 database holding two chats, as the production app (v1) leaves it.
+async function seedV1(page) {
+  await page.goto(base + 'tests/fixtures/models.json');
+  await page.evaluate(() => new Promise((res, rej) => {
+    const d = indexedDB.deleteDatabase('multaichat');
+    d.onsuccess = res; d.onerror = () => rej(d.error); d.onblocked = () => rej(new Error('delete blocked'));
+  }));
+  await page.evaluate(() => new Promise((res, rej) => {
+    const r = indexedDB.open('multaichat', 1);
+    r.onupgradeneeded = () => { const os = r.result.createObjectStore('conversations', { keyPath: 'id' }); os.createIndex('updatedAt', 'updatedAt'); };
+    r.onerror = () => rej(r.error);
+    r.onsuccess = () => {
+      const db = r.result;
+      const tx = db.transaction('conversations', 'readwrite');
+      for (const [id, title, n] of [['c_old1', 'Old chat A', 1], ['c_old2', 'Old chat B', 2]]) {
+        tx.objectStore('conversations').put({
+          id, title, createdAt: n, updatedAt: n,
+          lanes: [{ id: 'l_1', modelId: 'openai/gpt-6', modelName: 'OpenAI: GPT-6', active: true, joinedAtTurn: 0 }],
+          turns: [{ id: 't_' + n, index: 0, createdAt: n, kind: 'broadcast', inputs: { l_1: 'old question' },
+            responses: { l_1: { status: 'done', content: 'old answer ' + title.slice(-1), previous: [], asksQuestion: false } } }],
+        });
+      }
+      tx.oncomplete = () => { db.close(); res(); };
+    };
+  }));
+}
 const rowIds = (page) => page.$$eval('#picker-dialog .model-row', (rs) => rs.map((r) => r.dataset.id));
 
 const cases = {
@@ -162,6 +188,35 @@ const cases = {
     const [dl] = await Promise.all([page.waitForEvent('download'), page.click('button:has-text("Export all")')]);
     const json = JSON.parse(require('fs').readFileSync(await dl.path(), 'utf8'));
     assert.deepEqual(json.presets.map((p) => p.name), ['Mine']);
+  },
+
+  async 'v1 database upgrades with chats intact'(page) {
+    await seedV1(page);
+    await page.goto(base);
+    await page.waitForSelector('.conv');
+    assert.equal(await page.locator('.conv').count(), 2);
+    assert.equal(await page.evaluate(() => MC.app.state.store.kind), 'idb');
+    await page.locator('.conv-open', { hasText: 'Old chat B' }).click();
+    await page.waitForSelector('.turn');
+    assert.ok((await page.textContent('.turn')).includes('old answer B'));
+    const info = await page.evaluate(() => new Promise((res) => {
+      const r = indexedDB.open('multaichat');
+      r.onsuccess = () => { const db = r.result; res({ v: db.version, stores: [...db.objectStoreNames].sort() }); db.close(); };
+    }));
+    assert.deepEqual(info, { v: 2, stores: ['attachments', 'conversations'] });
+  },
+
+  async 'upgrade waits for an old tab instead of losing history'(page) {
+    await seedV1(page);
+    const old = await page.context().newPage();
+    await old.goto(base + 'tests/fixtures/models.json');
+    await old.evaluate(() => new Promise((res) => { const r = indexedDB.open('multaichat', 1); r.onsuccess = () => { window.held = r.result; res(); }; }));
+    await page.goto(base);
+    await page.waitForTimeout(800);
+    await old.close();
+    await page.waitForSelector('.conv');
+    assert.equal(await page.locator('.conv').count(), 2);
+    assert.equal(await page.evaluate(() => MC.app.state.store.kind), 'idb');
   },
 };
 

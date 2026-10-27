@@ -125,3 +125,65 @@ test('blocked storage getters do not crash', async () => {
     }
   }
 });
+
+const rec = (id) => ({ id, kind: 'image', name: id + '.png', mime: 'image/png', size: 3, data: 'data:image/png;base64,AA', createdAt: 1 });
+const convWith = (id, ids, extra = {}) => Object.assign({ id, title: id, updatedAt: 1, lanes: [], turns: [{ id: 't', index: 0, inputs: {}, responses: {}, attachments: ids.map((a) => ({ id: a, kind: 'image', name: a })) }] }, extra);
+
+for (const kind of ['local', 'memory']) {
+  test(`${kind} store keeps attachment records`, async () => {
+    const store = kind === 'local' ? await storage.openStore({ idb: undefined, ls: memoryStorage() }) : await storage.openStore({ idb: undefined, ls: undefined });
+    assert.equal(store.kind, kind);
+    await store.putAttachment(rec('a1'));
+    await store.putAttachment(rec('a2'));
+    assert.equal((await store.getAttachment('a1')).name, 'a1.png');
+    assert.deepEqual((await store.attachmentsFor(['a2', 'zz', 'a1'])).map((r) => r.id), ['a2', 'a1']);
+    await store.deleteAttachment('a1');
+    assert.equal(await store.getAttachment('a1'), undefined);
+  });
+}
+
+test('putAttachment surfaces quota', async () => {
+  const ls = memoryStorage();
+  const store = await storage.openStore({ idb: undefined, ls });
+  ls.setItem = () => { throw new Error('QuotaExceededError'); };
+  await assert.rejects(store.putAttachment(rec('a1')), /Quota/);
+});
+
+test('deleteConversation keeps attachments shared with a fork', async () => {
+  const store = await storage.openStore({ idb: undefined, ls: memoryStorage() });
+  await store.putAttachment(rec('a1'));
+  await store.putAttachment(rec('a2'));
+  await store.put(convWith('A', ['a1', 'a2']));
+  await store.put(convWith('B', ['a1'], { parentId: 'A' }));
+  await store.deleteConversation('A');
+  assert.equal(await store.get('A'), undefined);
+  assert.ok(await store.getAttachment('a1'), 'shared attachment kept');
+  assert.equal(await store.getAttachment('a2'), undefined, 'unshared attachment removed');
+  await store.deleteConversation('B');
+  assert.equal(await store.getAttachment('a1'), undefined);
+});
+
+test('refsOf lists unique attachment ids', () => {
+  const c = convWith('A', ['a1', 'a2']);
+  c.turns.push({ id: 't2', index: 1, inputs: {}, responses: {}, attachments: [{ id: 'a1' }] });
+  assert.deepEqual(storage.refsOf(c), ['a1', 'a2']);
+  assert.deepEqual(storage.refsOf({ turns: [] }), []);
+});
+
+test('export v2 carries attachments and presets', () => {
+  const obj = JSON.parse(storage.exportJson([convWith('A', ['a1'])], { attachments: [rec('a1')], presets: [{ id: 'p_1', name: 'P' }] }));
+  assert.equal(obj.version, 2);
+  assert.equal(obj.attachments[0].id, 'a1');
+  assert.equal(obj.presets[0].name, 'P');
+});
+
+test('parseImport accepts v1 and v2', () => {
+  const v1 = JSON.stringify({ app: 'multaichat', version: 1, conversations: [{ id: 'x', updatedAt: 1 }] });
+  assert.deepEqual(storage.parseImport(v1), { conversations: [{ id: 'x', updatedAt: 1 }], attachments: [], presets: [] });
+  const v2 = storage.exportJson([convWith('A', ['a1'])], { attachments: [rec('a1')], presets: [{ id: 'p_1', name: 'P' }] });
+  const r = storage.parseImport(v2);
+  assert.equal(r.conversations[0].id, 'A');
+  assert.equal(r.attachments[0].data, 'data:image/png;base64,AA');
+  assert.equal(r.presets[0].id, 'p_1');
+  assert.throws(() => storage.parseImport('{"app":"other"}'), /Not a Multaichat export/);
+});
