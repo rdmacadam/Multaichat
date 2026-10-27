@@ -177,3 +177,69 @@ test('fork of a streaming turn gets new turn ids and no streaming responses', ()
   assert.equal(f.turns[0].responses[A].content, 'partial');
   assert.equal(t0.responses[A].status, 'streaming', 'original untouched');
 });
+
+test('system prompt first, then seed context', () => {
+  const { conv, A, B } = twoLaneConv();
+  C.setSystemPrompt(conv, 'Be brief', 'p1');
+  assert.equal(conv.presetId, 'p1');
+  const t0 = C.addTurn(conv, 'broadcast', C.broadcastInputs(conv, 'q'));
+  finish(t0, A, 'a'); finish(t0, B, 'b');
+  const late = C.addLane(conv, { id: 'c/three', name: 'Three' });
+  C.addTurn(conv, 'broadcast', C.broadcastInputs(conv, 'q2'));
+  const msgs = C.buildMessages(conv, late.id, 1);
+  assert.deepEqual(msgs.slice(0, 2).map((m) => m.role), ['system', 'system']);
+  assert.equal(msgs[0].content, 'Be brief');
+  assert.match(msgs[1].content, /joined late/);
+});
+
+test('mid-chat change applies from next turn', () => {
+  const { conv, A, B } = twoLaneConv();
+  C.setSystemPrompt(conv, 'A');
+  for (const q of ['q0', 'q1']) {
+    const t = C.addTurn(conv, 'broadcast', C.broadcastInputs(conv, q));
+    finish(t, A, 'x'); finish(t, B, 'y');
+  }
+  C.setSystemPrompt(conv, 'B');
+  assert.equal(C.promptAt(conv, 0), 'A');
+  assert.equal(C.promptAt(conv, 1), 'A');
+  assert.equal(C.promptAt(conv, 2), 'B');
+  assert.equal(C.buildMessages(conv, A, 1)[0].content, 'A');
+  C.addTurn(conv, 'broadcast', C.broadcastInputs(conv, 'q2'));
+  const m = C.buildMessages(conv, A, 2);
+  assert.equal(m[0].content, 'B');
+  assert.equal(m.filter((x) => x.role === 'system').length, 1);
+});
+
+test('setting a prompt before any turn overwrites without history', () => {
+  const { conv } = twoLaneConv();
+  C.setSystemPrompt(conv, 'one');
+  C.setSystemPrompt(conv, 'two');
+  assert.equal(C.promptAt(conv, 0), 'two');
+  assert.deepEqual(conv.systemPromptHistory || [], []);
+});
+
+test('clearing removes prompt for later turns only', () => {
+  const { conv, A, B } = twoLaneConv();
+  C.setSystemPrompt(conv, 'A', 'p1');
+  const t = C.addTurn(conv, 'broadcast', C.broadcastInputs(conv, 'q'));
+  finish(t, A, 'x'); finish(t, B, 'y');
+  C.setSystemPrompt(conv, '');
+  assert.equal(conv.systemPrompt, undefined);
+  assert.equal(conv.presetId, undefined);
+  assert.equal(C.promptAt(conv, 0), 'A');
+  assert.equal(C.promptAt(conv, 1), null);
+  C.addTurn(conv, 'broadcast', C.broadcastInputs(conv, 'q1'));
+  assert.equal(C.buildMessages(conv, A, 1)[0].role, 'user');
+});
+
+test('fork keeps system prompt and history', () => {
+  const { conv, A, B } = twoLaneConv();
+  C.setSystemPrompt(conv, 'A', 'p1');
+  const t = C.addTurn(conv, 'broadcast', C.broadcastInputs(conv, 'q'));
+  finish(t, A, 'x'); finish(t, B, 'y');
+  C.setSystemPrompt(conv, 'B', 'p2');
+  const f = C.fork(conv, 0);
+  assert.equal(f.systemPrompt, 'B');
+  assert.equal(f.presetId, 'p2');
+  assert.equal(C.promptAt(f, 0), 'A');
+});

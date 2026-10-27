@@ -56,11 +56,41 @@
 
   function hasAnswer(r) { return r && (r.status === 'done' || r.status === 'stopped') && !!r.content; }
 
+  // The chat's system prompt applies from turn `systemPromptFromTurn` on;
+  // earlier prompts are kept in `systemPromptHistory` so rebuilt history uses
+  // the prompt that was in force at each turn.
+  function setSystemPrompt(conv, text, presetId) {
+    if (conv.turns.length) {
+      conv.systemPromptHistory = conv.systemPromptHistory || [];
+      conv.systemPromptHistory.push({ fromTurn: conv.systemPromptFromTurn || 0, text: conv.systemPrompt || '' });
+      conv.systemPromptFromTurn = conv.turns.length;
+    } else {
+      conv.systemPromptFromTurn = 0;
+    }
+    if (text && text.trim()) {
+      conv.systemPrompt = text;
+      if (presetId) conv.presetId = presetId; else delete conv.presetId;
+    } else {
+      delete conv.systemPrompt;
+      delete conv.presetId;
+    }
+    touch(conv);
+  }
+
+  function promptAt(conv, turnIndex) {
+    if (turnIndex >= (conv.systemPromptFromTurn || 0)) return conv.systemPrompt || null;
+    const past = (conv.systemPromptHistory || []).filter((h) => h.fromTurn <= turnIndex);
+    const h = past[past.length - 1];
+    return (h && h.text) || null;
+  }
+
   // Messages to send a lane for turn `uptoTurnIndex`: its history before that
   // turn plus that turn's user input (never that turn's own answer).
   function buildMessages(conv, laneId, uptoTurnIndex) {
     const lane = laneById(conv, laneId);
     const msgs = [];
+    const sys = promptAt(conv, uptoTurnIndex);
+    if (sys) msgs.push({ role: 'system', content: sys });
     if (lane && lane.seedContext) msgs.push({ role: 'system', content: lane.seedContext });
     for (const turn of conv.turns) {
       if (turn.index > uptoTurnIndex) break;
@@ -145,5 +175,5 @@
     return Object.keys(turn.responses).filter((id) => hasAnswer(turn.responses[id]));
   }
 
-  return { NEW_TITLE, create, addTurn, broadcastInputs, laneById, turnById, buildMessages, addLane, removeLane, beginRetry, fork, recoverInterrupted, answeredLanes, touch };
+  return { NEW_TITLE, setSystemPrompt, promptAt, create, addTurn, broadcastInputs, laneById, turnById, buildMessages, addLane, removeLane, beginRetry, fork, recoverInterrupted, answeredLanes, touch };
 });
