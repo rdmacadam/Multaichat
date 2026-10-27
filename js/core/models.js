@@ -229,5 +229,5 @@
     };
   }
 
-  return { FLAGSHIP, OPEN_PROVIDERS, FALLBACK_RAW, normalize, normalizeDeciders, sections, search, sortBy, filter, activeFilterCount, loadCached, loadDeciders, reconcileSelection };
+  return { FLAGSHIP, OPEN_PROVIDERS, EXCLUDE, FALLBACK_RAW, normalize, normalizeDeciders, sections, search, sortBy, filter, activeFilterCount, loadCached, loadDeciders, reconcileSelection };
 });

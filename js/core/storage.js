@@ -23,6 +23,19 @@
     pickerFilters: Object.freeze({ maxIn: '', maxOut: '', minContext: '', images: false, files: false }),
     defaultPresetId: null,
     pdfMode: 'auto',
+    router: Object.freeze({
+      enabled: false,
+      mode: 'auto',
+      count: 3,
+      pool: 'catalog',
+      decisionModel: 'perplexity/pplx-decider-v1.2',
+      manualPool: Object.freeze([]),
+      extras: Object.freeze({ fusion: false, judge: false }),
+      preview: false,
+      allowPaidInFree: false,
+    }),
+    starredDeciders: Object.freeze(['liquid/d1-ultra', 'typesafe/jev-1.14', 'inception/mercury-decide',
+      'perplexity/pplx-decider-v1.2', 'baseten/mammoth-1:free', 'baseten/elephant-1:free']),
   });
 
   // Reading localStorage/indexedDB throws when the browser blocks site data.

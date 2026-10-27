@@ -196,3 +196,13 @@ test('parseImport drops unsafe attachment records', () => {
   const r = storage.parseImport(storage.exportJson([], { attachments: [bad, good] }));
   assert.deepEqual(r.attachments.map((a) => a.id), ['a1']);
 });
+
+test('defaults include router and starred deciders', () => {
+  assert.deepEqual(storage.DEFAULT_SETTINGS.router, {
+    enabled: false, mode: 'auto', count: 3, pool: 'catalog', decisionModel: 'perplexity/pplx-decider-v1.2',
+    manualPool: [], extras: { fusion: false, judge: false }, preview: false, allowPaidInFree: false,
+  });
+  assert.deepEqual(storage.DEFAULT_SETTINGS.starredDeciders, ['liquid/d1-ultra', 'typesafe/jev-1.14', 'inception/mercury-decide',
+    'perplexity/pplx-decider-v1.2', 'baseten/mammoth-1:free', 'baseten/elephant-1:free']);
+  assert.deepEqual(storage.createSettings(memoryStorage()).get().router, storage.DEFAULT_SETTINGS.router);
+});
