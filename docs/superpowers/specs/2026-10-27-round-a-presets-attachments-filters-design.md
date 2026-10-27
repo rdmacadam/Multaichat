@@ -125,8 +125,21 @@ Fork copies `systemPrompt`, `presetId` and history.
 ### UI
 
 - Header button **Presets** opens a dialog listing presets with Apply,
-  Edit, Duplicate, Delete, and "＋ New preset" / "Save current chat as preset"
-  (captures current system prompt, active models, and empty template).
+  Edit, Duplicate, Delete, "＋ New preset" and **Save current as preset**.
+- **Save current as preset** captures the current customizations into a
+  pre-filled save form: name (empty, required), ☑ system prompt (the chat's
+  current `systemPrompt`, preset-derived or typed), ☑ models (the chat's
+  active lanes, or the current selection when no chat exists), ☑ template
+  (the composer's current text, if non-empty). Each part can be unticked or
+  edited before saving; at least one part must be kept.
+- The system-prompt dialog (opened from the 📝 chip) also has
+  **Save as preset**, opening the same form.
+- **Edited presets:** when the chat's `systemPrompt` differs from its
+  `presetId` preset's prompt, the chip reads "📝 <name> (edited)" and its
+  dialog offers **Update preset** (user presets only: overwrite that preset's
+  system prompt) and **Save as new**. Built-ins only offer Save as new.
+- `MC.presets.fromCurrent({systemPrompt, models, template})` (pure) builds the
+  form's initial values; `isEdited(conv, preset)` (pure) drives the chip.
 - Preset editor: name, system prompt (textarea), template (textarea), models
   (opens the existing picker in select mode).
 - **Apply to a new/empty chat:** sets selected models (if the preset has
@@ -253,7 +266,7 @@ for them.
 | file | change |
 |---|---|
 | `js/core/models.js` | `inputs/images/files` in `normalize`; `filter` new fields |
-| `js/core/presets.js` (new) | `MC.presets`: built-ins, `createPresetStore(ls)` → `{list, get, save, remove, duplicate}`, `applyPlan(preset, conv)` (pure: what to change) |
+| `js/core/presets.js` (new) | `MC.presets`: built-ins, `createPresetStore(ls)` → `{list, get, save, remove, duplicate}`, `applyPlan(preset, conv)`, `fromCurrent(...)`, `isEdited(conv, preset)` (pure) |
 | `js/core/attach.js` (new) | `MC.attach`: `classify(file)`, `limits`, `textBlock(name, text)`, `toParts(refs, resolve)`, `incapable(lanes, modelsById)`, `pdfEngine(model, pdfMode)`, `summaryNote(refs)` (pure) |
 | `js/ui/files.js` (new) | browser-only: read `File` → data URL/text, image downscale via canvas |
 | `js/core/conversation.js` | system prompt fields + history; `buildMessages` system prompt + attachments; `addTurn` accepts `{attachments, delivery, skipped}`; fork copies new fields |
@@ -279,13 +292,13 @@ for them.
   regressions — must stay green after every task.
 - New unit tests: filters (each field, combined with search tokens, unknown
   price), presets (store CRUD, corrupt storage, built-ins undeletable,
-  apply plan new vs mid-chat), system prompt in `buildMessages` (ordering
+  apply plan new vs mid-chat, `fromCurrent` with/without composer text and chat, `isEdited`), system prompt in `buildMessages` (ordering
   with seed context, history per turn, fork), attachments (classify,
   limits, text block & truncation, parts per kind, delivery full/text/skip,
   re-send in history, missing record, pdf engine per mode/model, incapable
   lanes incl. unknown model), storage (v2 store, ref-aware delete, export /
   import v2 round-trip, v1 export import), `streamChat` forwards `plugins`.
-- New browser tests (mocked OpenRouter records request bodies): preset apply
+- New browser tests (mocked OpenRouter records request bodies): "Save current as preset" round-trip (customize → save → new chat → apply → same prompt, models, template); preset apply
   sets chip/models/template and the system message reaches requests; image
   + PDF attach via 📎 and paste; capability dialog Skip and Text-only produce
   the right cells and request bodies; attachments survive reload; filters
