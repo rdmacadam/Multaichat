@@ -35,15 +35,17 @@ const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers
 // opts.requests: array that receives every chat request body.
 // opts.noDeciders: the decisions list is empty; opts.decisions: array that receives every decision body;
 // opts.decideStatus: {modelId: httpStatus} makes that decision model fail; opts.decideDelay: ms before each decision answer.
+// opts.judgeNoProb: the judge answer has a choice but no probabilities; opts.decisionCost: cost in each decision's usage.
 // Default decision answer: pick = labels in criteria order with halving probabilities, task = chat,
 // best = last label at 0.7.
-function decisionAnswer(body) {
+function decisionAnswer(body, opts = {}) {
   const answers = {};
   for (const [name, q] of Object.entries(body.questions || {})) {
     const labels = Object.keys(q.criteria || {});
     if (name === 'task') answers[name] = { choice: 'chat' };
     else if (name === 'best') {
       const last = labels[labels.length - 1];
+      if (opts.judgeNoProb) { answers[name] = { choice: last }; continue; }
       answers[name] = { choice: last, probabilities: Object.fromEntries(labels.map((l) => [l, l === last ? 0.7 : 0.3 / Math.max(1, labels.length - 1)])) };
     } else {
       let p = 0.5;
@@ -52,7 +54,7 @@ function decisionAnswer(body) {
       answers[name] = { choice: labels[0], probabilities };
     }
   }
-  return { model: body.model, answers, usage: { input_tokens: 100, output_tokens: 0, cost: 0.000002 } };
+  return { model: body.model, answers, usage: { input_tokens: 100, output_tokens: 0, cost: opts.decisionCost != null ? opts.decisionCost : 0.000002 } };
 }
 
 async function mockOpenRouter(page, opts = {}) {
@@ -66,7 +68,7 @@ async function mockOpenRouter(page, opts = {}) {
     // The page may have aborted the request meanwhile (Stop while routing).
     const done = () => {};
     if (status) return route.fulfill({ status, headers: CORS, contentType: 'application/json', body: JSON.stringify({ error: { code: status, message: 'decision failed' } }) }).catch(done);
-    return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(decisionAnswer(body)) }).catch(done);
+    return route.fulfill({ status: 200, headers: CORS, contentType: 'application/json', body: JSON.stringify(decisionAnswer(body, opts)) }).catch(done);
   });
   await page.route('https://openrouter.ai/api/v1/**', async (route) => {
     const req = route.request();

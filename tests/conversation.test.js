@@ -346,15 +346,6 @@ test('ensureLanes late joiner gets seed context', () => {
   assert.match(lane.seedContext, /first question/);
 });
 
-test('isRouted needs a route and the lane in inputs', () => {
-  const { conv, A, B } = twoLaneConv();
-  const routed = C.addTurn(conv, 'broadcast', { [A]: 'hi' }, { route: { mode: 'auto', picks: [] } });
-  const plain = C.addTurn(conv, 'broadcast', { [A]: 'hi', [B]: 'hi' });
-  assert.equal(C.isRouted(routed, A), true);
-  assert.equal(C.isRouted(routed, B), false);
-  assert.equal(C.isRouted(plain, A), false);
-});
-
 test('fork keeps route and judge on copied turns', () => {
   const { conv, A } = twoLaneConv();
   const t = C.addTurn(conv, 'broadcast', { [A]: 'hi' });

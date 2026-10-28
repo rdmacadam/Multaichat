@@ -147,10 +147,12 @@ const cases = {
     assert.equal(await dlg.locator('.row-pool').isVisible(), true);
     await page.waitForFunction(() => document.querySelector('#topbar .router-btn').textContent.trim() === '🧭 Native');
     assert.equal(await page.getAttribute('#prompt', 'placeholder'), 'Ask — OpenRouter picks the model…');
-    // back to auto: the count is editable again
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('mc.settings')).router.count), 3, 'native does not overwrite the saved count');
+    // back to auto: the count is editable again and is still the saved one
     await dlg.locator('input[name="router-mode"][value="auto"]').check();
     assert.equal(await dlg.locator('input.router-count').isDisabled(), false);
-    await page.waitForFunction(() => /^🧭 Auto ×\d$/.test(document.querySelector('#topbar .router-btn').textContent.trim()));
+    await page.waitForFunction(() => document.querySelector('#topbar .router-btn').textContent.trim() === '🧭 Auto ×3');
+    assert.equal(await dlg.locator('input.router-count').inputValue(), '3');
   },
 
   async 'decider list shows the six stars first and filters by images and free'(page) {
@@ -233,6 +235,14 @@ const cases = {
     await dlg.locator('input[name="router-mode"][value="best"]').check();
     assert.equal(await dlg.locator('.row-paid').isHidden(), true);
     assert.equal(await dlg.locator('.row-extras .info').count(), 2);
+    // Escape on a focused ⓘ closes only its tip, not the panel
+    const i = dlg.locator('.row-extras .info').first();
+    await i.focus();
+    assert.equal(await dlg.locator('.row-extras .tip').first().isVisible(), true);
+    await page.keyboard.press('Escape');
+    assert.equal(await dlg.locator('.row-extras .tip').first().isHidden(), true);
+    await page.waitForTimeout(200);
+    assert.equal(await dlg.isVisible(), true, 'the panel stays open');
   },
 
   async 'router panel fits a phone-width screen'(page) {
@@ -513,7 +523,100 @@ const cases = {
     assert.equal(page.requests.filter((r) => r.response_format).length, 1);
   },
 
+  async 'New chat or opening another chat while routing sends nothing into the other chat'(page) {
+    const routing = () => page.waitForFunction(() => /🧭 routing…/.test(document.querySelector('#composer').textContent));
+    const inputsOf = (id) => page.evaluate((i) => MC.app.state.store.get(i).then((c) => c.turns.map((t) => Object.values(t.inputs)[0])), id);
+    await ask(page, 'Chat A first');
+    await allDone(page, 1);
+    const aId = await page.evaluate(() => MC.app.state.conv.id);
+    const sent = chatModels(page).length;
+    // New chat while routing in chat A
+    await ask(page, 'SECRET for A');
+    await routing();
+    await page.click('#sidebar button:has-text("New chat")');
+    await page.waitForTimeout(1600);
+    assert.equal(await page.evaluate(() => MC.app.state.conv), null, 'still the new, empty chat');
+    assert.equal(await page.inputValue('#prompt'), 'SECRET for A', 'composer keeps the text');
+    assert.equal(chatModels(page).length, sent, 'nothing sent');
+    assert.deepEqual(await inputsOf(aId), ['Chat A first']);
+    assert.equal(await page.locator('.turn').count(), 0);
+    // opening chat A while routing in the new chat
+    await page.fill('#prompt', 'SECRET for the new chat');
+    await page.press('#prompt', 'Enter');
+    await routing();
+    await page.click(`#sidebar li.conv[data-id="${aId}"] .conv-open`);
+    await page.waitForTimeout(1600);
+    assert.equal(await page.evaluate(() => MC.app.state.conv.id), aId);
+    assert.equal(await page.inputValue('#prompt'), 'SECRET for the new chat');
+    assert.equal(chatModels(page).length, sent, 'nothing sent');
+    assert.deepEqual(await inputsOf(aId), ['Chat A first']);
+    assert.equal(await page.locator('.turn').count(), 1);
+    assert.equal((await page.evaluate(() => MC.app.state.store.list())).length, 1, 'no new chat was stored');
+  },
 
+  async 'chat changed while the preview is open: nothing sent, decision still counted'(page) {
+    const dlg = page.locator('#route-preview-dialog');
+    await ask(page, 'Chat A first');
+    await dlg.waitFor({ state: 'visible' });
+    await dlg.getByRole('button', { name: 'Send', exact: true }).click();
+    await allDone(page, 1);
+    const aId = await page.evaluate(() => MC.app.state.conv.id);
+    const sent = chatModels(page).length;
+    await ask(page, 'SECRET for A');
+    await dlg.waitFor({ state: 'visible' });
+    await page.evaluate(() => MC.app.newChat());
+    await dlg.getByRole('button', { name: 'Send', exact: true }).click();
+    await dlg.waitFor({ state: 'hidden' });
+    await page.waitForSelector('.toast:has-text("Chat changed — message not sent")');
+    assert.equal(await page.evaluate(() => MC.app.state.conv), null);
+    assert.equal(await page.inputValue('#prompt'), 'SECRET for A');
+    assert.equal(chatModels(page).length, sent, 'nothing sent');
+    const a = await page.evaluate((i) => MC.app.state.store.get(i), aId);
+    assert.equal(a.turns.length, 1);
+    assert.equal(await page.evaluate((c) => MC.cost.summary(c).parts.router, a), 0.000004, 'chat A counts both decisions');
+  },
+
+  async 'cancelled preview and "my selection instead" still count the decision in Σ'(page) {
+    const dlg = page.locator('#route-preview-dialog');
+    const router = () => page.evaluate(() => MC.cost.summary(MC.app.state.conv).parts.router);
+    await ask(page, 'Cancel me');
+    await dlg.waitFor({ state: 'visible' });
+    await dlg.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await dlg.waitFor({ state: 'hidden' });
+    await page.press('#prompt', 'Enter');
+    await dlg.waitFor({ state: 'visible' });
+    await dlg.getByRole('button', { name: 'Send', exact: true }).click();
+    await allDone(page, 1);
+    assert.equal(page.decisions.length, 2);
+    assert.equal(await router(), 0.000004, 'the cancelled decision counts too');
+    await ask(page, 'All of you');
+    await dlg.waitFor({ state: 'visible' });
+    await dlg.getByRole('button', { name: 'Send to my selection instead' }).click();
+    await allDone(page, 2);
+    assert.equal(await router(), 0.000006);
+    await page.reload(); await page.waitForSelector('.turn');
+    assert.equal(await router(), 0.000006, 'survives reload');
+    await page.focus('.cost-wrap .info');
+    assert.match(await tip(page).textContent(), /Router decisions/);
+  },
+
+  async 'judge without probabilities still shows the best badge'(page) {
+    await ask(page, 'Which is best?');
+    await allDone(page, 1);
+    await page.waitForFunction(() => MC.app.state.conv.turns[0].judge && MC.app.state.conv.turns[0].judge.status === 'done');
+    assert.equal(await page.evaluate(() => MC.app.state.conv.turns[0].judge.p), null);
+    await page.waitForSelector('.cell .badge.best');
+    assert.equal(await page.locator('.badge.best').count(), 1);
+    assert.equal((await page.textContent('.badge.best')).trim(), '🏆 best');
+  },
+
+  async 'a free decision shows "free" in the route bar'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    const bar = await page.textContent('.route-bar');
+    assert.match(bar, / · free · /);
+    assert.doesNotMatch(bar, /<\$0\.0001/);
+  },
 };
 cases['starred deciders missing from the catalog are greyed'].opts = { noDeciders: true };
 cases['auto mode routes to the top N and shows the route bar'].init = routerInit({ mode: 'auto', count: 2, pool: 'catalog' });
@@ -533,6 +636,15 @@ cases['Stop while routing sends nothing and keeps the text'].opts = { decideDela
 cases['very best with judge marks the best answer and the counter includes the judge'].init = routerInit({ mode: 'best', count: 3, extras: { judge: true } });
 cases['very best with fuse renders a Fusion'].init = routerInit({ mode: 'best', count: 3, extras: { fusion: true } });
 cases['auto Fusion and the fuse extra run Fusion once'].init = routerInit({ mode: 'best', count: 3, extras: { fusion: true } }, { autoFusion: true });
+
+cases['New chat or opening another chat while routing sends nothing into the other chat'].init = routerInit({ mode: 'auto', count: 2 });
+cases['New chat or opening another chat while routing sends nothing into the other chat'].opts = { decideDelay: 1200 };
+cases['chat changed while the preview is open: nothing sent, decision still counted'].init = routerInit({ mode: 'auto', count: 2, preview: true });
+cases['cancelled preview and "my selection instead" still count the decision in Σ'].init = routerInit({ mode: 'auto', count: 2, preview: true });
+cases['judge without probabilities still shows the best badge'].init = routerInit({ mode: 'best', count: 3, extras: { judge: true } });
+cases['judge without probabilities still shows the best badge'].opts = { judgeNoProb: true };
+cases['a free decision shows "free" in the route bar'].init = routerInit({ mode: 'auto', count: 2 });
+cases['a free decision shows "free" in the route bar'].opts = { decisionCost: 0 };
 
 (async () => {
   const browser = await chromium.launch();

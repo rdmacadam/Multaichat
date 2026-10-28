@@ -435,7 +435,7 @@ test('taskOf reads the task choice', () => {
   assert.equal(Router.taskOf(null), null);
 });
 
-test('withDefaults merges extras and clamps count; native forces 1', () => {
+test('withDefaults merges extras and clamps count; native keeps the stored count', () => {
   const DEF = { enabled: false, mode: 'auto', count: 3, pool: 'catalog', decisionModel: 'perplexity/pplx-decider-v1.2',
     manualPool: [], extras: { fusion: false, judge: false }, preview: false, allowPaidInFree: false };
   assert.deepEqual(Router.withDefaults(undefined), DEF);
@@ -448,7 +448,7 @@ test('withDefaults merges extras and clamps count; native forces 1', () => {
   assert.deepEqual(s.manualPool, ['a/b']);
   assert.equal(Router.withDefaults({ count: 0 }).count, 1);
   assert.equal(Router.withDefaults({ count: 'x' }).count, 3);
-  assert.equal(Router.withDefaults({ mode: 'native', count: 5 }).count, 1);
+  assert.equal(Router.withDefaults({ mode: 'native', count: 5 }).count, 5, 'native clamps to 1 only where used');
   assert.equal(Router.withDefaults({ mode: 'weird' }).mode, 'auto');
   assert.equal(Router.withDefaults({ pool: 'weird' }).pool, 'catalog');
   assert.equal(Router.withDefaults({ pool: 'selection' }).pool, 'selection');

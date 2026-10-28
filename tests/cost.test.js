@@ -59,3 +59,20 @@ test('addReplaced adds lazily and ignores non-numeric cost', () => {
   assert.deepEqual(turn.spentReplaced, { derived: 0.4, judge: 0.2 });
   assert.ok(Number.isFinite(turn.spentReplaced.derived));
 });
+
+test('summary counts decisions for messages that were never sent under router decisions', () => {
+  const conv = { spentUnsent: 0.000004, turns: [{ responses: {}, route: { usage: { cost: 0.000002 } } }] };
+  const s = Cost.summary(conv);
+  assert.equal(s.parts.router, 0.000006);
+  assert.equal(s.total, 0.000006);
+  assert.equal(Cost.summary({ spentUnsent: 0.00001, turns: [] }).total, 0.00001);
+});
+
+test('addUnsent adds a discarded decision cost to the chat', () => {
+  const conv = { turns: [] };
+  Cost.addUnsent(conv, { cost: 0.000002 });
+  Cost.addUnsent(conv, { cost: 0.000003 });
+  Cost.addUnsent(conv, { cost: null });
+  Cost.addUnsent(conv, undefined);
+  assert.equal(Math.round(conv.spentUnsent * 1e9), 5000);
+});
