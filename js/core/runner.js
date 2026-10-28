@@ -288,7 +288,8 @@
         systemPrompt, contextNote, textContents, signal, timeoutMs = DECISION_TIMEOUT,
       } = opts || {};
       const s = MC.router.withDefaults(opts && opts.settings);
-      const { mode, count } = s;
+      const { mode } = s;
+      const count = mode === 'native' ? 1 : s.count;
       const pool = MC.router.candidates(models, { mode, pool: s.pool, selection, manualPool: s.manualPool, filters, attachments });
       if (!pool.list.length) return { ok: false, reason: 'empty', message: EMPTY_POOL[pool.reason] || EMPTY_POOL_DEFAULT };
       if (signal && signal.aborted) return fatalDecision({ status: 'aborted' });

@@ -33,6 +33,8 @@
         if (isNum(sr.judge)) parts.judge += sr.judge;
       }
     }
+    // Decisions paid for messages that were never sent (preview cancelled, …).
+    if (conv && isNum(conv.spentUnsent)) parts.router += conv.spentUnsent;
     // Round away float noise (sums of tiny USD amounts).
     const r = (n) => Math.round(n * 1e12) / 1e12;
     for (const k of Object.keys(parts)) parts[k] = r(parts[k]);
@@ -47,5 +49,11 @@
     sr[kind] = (sr[kind] || 0) + usage.cost;
   }
 
-  return { summary, addReplaced };
+  // A routing decision whose message was not sent still cost what it cost.
+  function addUnsent(conv, usage) {
+    if (!conv || !usage || !isNum(usage.cost)) return;
+    conv.spentUnsent = (isNum(conv.spentUnsent) ? conv.spentUnsent : 0) + usage.cost;
+  }
+
+  return { summary, addReplaced, addUnsent };
 });

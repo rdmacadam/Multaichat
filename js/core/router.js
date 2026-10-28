@@ -63,7 +63,9 @@
     const extras = r.extras && typeof r.extras === 'object' ? r.extras : {};
     const mode = MODES.includes(r.mode) ? r.mode : DEFAULTS.mode;
     const n = Math.floor(Number(r.count));
-    const count = mode === 'native' ? 1 : isFinite(n) && r.count !== '' && r.count != null
+    // Native always uses 1, but that clamp is applied where the count is used,
+    // so trying Native does not overwrite the saved count.
+    const count = isFinite(n) && r.count !== '' && r.count != null
       ? Math.min(MAX_COUNT, Math.max(1, n)) : DEFAULTS.count;
     return {
       enabled: bool(r.enabled, DEFAULTS.enabled),

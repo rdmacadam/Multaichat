@@ -158,9 +158,6 @@
     });
   }
 
-  // True when the turn was routed and `laneId` was one of the picked lanes.
-  function isRouted(turn, laneId) { return !!turn.route && laneId in turn.inputs; }
-
   function removeLane(conv, laneId) {
     const l = laneById(conv, laneId);
     if (l) { l.active = false; touch(conv); }
@@ -219,5 +216,5 @@
     return Object.keys(turn.responses).filter((id) => hasAnswer(turn.responses[id]));
   }
 
-  return { NEW_TITLE, setSystemPrompt, promptAt, attachmentIdsFor, create, addTurn, broadcastInputs, laneById, turnById, buildMessages, addLane, ensureLanes, isRouted, removeLane, beginRetry, fork, recoverInterrupted, answeredLanes, touch };
+  return { NEW_TITLE, setSystemPrompt, promptAt, attachmentIdsFor, create, addTurn, broadcastInputs, laneById, turnById, buildMessages, addLane, ensureLanes, removeLane, beginRetry, fork, recoverInterrupted, answeredLanes, touch };
 });

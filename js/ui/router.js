@@ -233,8 +233,8 @@
       enabled.checked = c.enabled;
       dlg.querySelectorAll('input[name="router-mode"]').forEach((el) => { el.checked = el.value === c.mode; });
       dlg.querySelectorAll('.mode-card').forEach((el) => el.classList.toggle('selected', el.dataset.mode === c.mode));
-      count.value = String(c.count);
       const native = c.mode === 'native';
+      count.value = String(native ? 1 : c.count);
       count.disabled = native;
       down.disabled = native || c.count <= 1;
       up.disabled = native || c.count >= MAX_COUNT;

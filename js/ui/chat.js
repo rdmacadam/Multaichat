@@ -140,7 +140,7 @@
     const runner = app().state.runner;
     const uniqueInputs = new Set(mainInputs(turn)).size;
     const textOnly = turn.delivery && turn.delivery[lane.id] === 'text';
-    const best = !!(turn.judge && turn.judge.status === 'done' && turn.judge.laneId === lane.id && turn.judge.p != null);
+    const best = !!(turn.judge && turn.judge.status === 'done' && turn.judge.laneId === lane.id);
     const actions = [];
     if (r.status === 'streaming') actions.push(h('button', { class: 'ghost small', onclick: () => runner.stop(turn.id, lane.id) }, '■ Stop'));
     else {
@@ -153,7 +153,7 @@
     return h('div', base,
       h('div', { class: 'cell-head' }, h('span', { class: 'cell-model' }, shortName(lane.modelName),
         textOnly ? h('span', { class: 'badge tag-text-only', title: 'Attachments were left out for this model' }, 'text only') : null,
-        best ? h('span', { class: 'badge best', title: 'Picked by the judge as the best answer' }, '🏆 best (' + Math.round(turn.judge.p * 100) + ' %)') : null), statusLine(r)),
+        best ? h('span', { class: 'badge best', title: 'Picked by the judge as the best answer' }, '🏆 best' + (typeof turn.judge.p === 'number' ? ' (' + Math.round(turn.judge.p * 100) + ' %)' : '')) : null), statusLine(r)),
       uniqueInputs > 1 && !textOnly ? h('div', { class: 'cell-input' }, h('span', { class: 'muted small' }, 'You: '), displayText(turn.inputs[lane.id])) : null,
       h('div', { class: 'md', html: r.content ? MC.md.render(r.content) : r.status === 'streaming' ? '<p class="muted">…</p>' : '' }),
       r.servedModel ? h('div', { class: 'served muted small', title: r.servedModel }, '→ answered by ' + modelShort(r.servedModel)) : null,
@@ -248,7 +248,7 @@
     if (route.method === 'rules') bits.push('picked by rules');
     else if (route.decisionModel) bits.push(deciderShort(route.decisionModel));
     if (route.task) bits.push('task: ' + route.task);
-    if (route.usage && route.usage.cost != null) bits.push(U.formatCost(route.usage.cost));
+    if (route.usage && route.usage.cost != null) bits.push(route.usage.cost === 0 ? 'free' : U.formatCost(route.usage.cost));
     if (route.ms != null) bits.push(seconds(route.ms));
     const picks = (route.picks || []).map((x) => modelShort(x.modelId, conv) + (x.p == null ? '' : ' ' + Math.round(x.p * 100) + ' %'));
     return bits.join(' · ') + (picks.length ? ' — ' + picks.join(' · ') : '');

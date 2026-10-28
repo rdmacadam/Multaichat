@@ -97,7 +97,7 @@
       if (pressFocused) { pressFocused = false; if (!tip.hidden) return; }
       if (tip.hidden) show(); else hide();
     });
-    btn.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !tip.hidden) { e.stopPropagation(); hide(); } });
+    btn.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !tip.hidden) { e.preventDefault(); e.stopPropagation(); hide(); } });
     return h('span', { class: 'info-wrap' }, btn, tip);
   }
 

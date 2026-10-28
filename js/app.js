@@ -155,6 +155,7 @@
     const ids = cfg().selected;
     state.conv = MC.conv.create(ids.map((id) => ({ id, name: (modelById(id) || { name: id }).name })));
     if (state.draft.systemPrompt) MC.conv.setSystemPrompt(state.conv, state.draft.systemPrompt, state.draft.presetId);
+    if (state.draft.spentUnsent) state.conv.spentUnsent = state.draft.spentUnsent;
     state.draft = {};
     return state.conv;
   }
@@ -165,7 +166,10 @@
 
   function setChatSystemPrompt(text, presetId) {
     if (state.conv) { MC.conv.setSystemPrompt(state.conv, text, presetId); save(state.conv); }
-    else state.draft = text && text.trim() ? { systemPrompt: text, presetId } : {};
+    else {
+      const kept = state.draft.spentUnsent ? { spentUnsent: state.draft.spentUnsent } : {};
+      state.draft = Object.assign(kept, text && text.trim() ? { systemPrompt: text, presetId } : {});
+    }
     refresh();
   }
 
@@ -190,9 +194,9 @@
     return true;
   }
 
-  async function sendTurn(kind, inputs, extra) {
+  // `conv`: the chat the message was written in (defaults to the open one).
+  async function sendTurn(kind, inputs, extra, conv = state.conv) {
     if (blockedByBusy()) return null;
-    const conv = state.conv;
     const turn = await state.runner.send(conv, kind, inputs, extra);
     if (deleted.has(conv.id)) return turn;
     autoDerive(conv, turn);
@@ -259,7 +263,7 @@
     const textContents = textContentsOf(read);
     const { inputs, delivery, skipped } = MC.attach.buildInputs({ text, refs, textContents, laneIds: lanes.map((l) => l.id), incapableIds, choice });
     if (!Object.keys(inputs).length) { toast('None of the selected models can read images', 'warn'); return false; }
-    const p = sendTurn(targetLaneId ? 'targeted' : 'broadcast', inputs, { attachments: refs, delivery, skipped });
+    const p = sendTurn(targetLaneId ? 'targeted' : 'broadcast', inputs, { attachments: refs, delivery, skipped }, conv);
     refresh();
     p.catch(() => {});
     return true;
@@ -285,29 +289,48 @@
 
   function abortRoute() { if (state.routing) state.routing.abort(); }
 
+  // A paid decision whose message is not sent still counts in the chat's Σ
+  // (the open chat it was made for, or the draft until that chat exists).
+  function keepUnsentCost(holder, route) {
+    if (!route || !route.usage || !holder) return;
+    MC.cost.addUnsent(holder, route.usage);
+    if (holder.id) save(holder);
+    updateCost();
+  }
+
   // Lets the router pick the models for this message, then sends it to them.
-  // Resolves false (composer keeps its content) when stopped, cancelled or on errors.
+  // Resolves false (composer keeps its content) when stopped, cancelled, the
+  // chat was changed meanwhile, or on errors.
   async function sendRouted(text, files = []) {
     if (blockedByBusy() || state.routing) return false;
-    let att = { refs: [], read: [] };
-    if (files.length) { att = await readAttachments(files); if (!att) return false; }
-    const { refs, read } = att;
-    const images = Object.fromEntries(read.filter((r) => r.ref.kind === 'image').map((r) => [r.ref.id, r.record.data]));
-    const textContents = textContentsOf(read);
-    const c = cfg();
+    // The chat this message belongs to; switching chats aborts the routing.
+    const startConv = state.conv;
+    const startHolder = promptHolder();
     const ctrl = new AbortController();
     state.routing = ctrl;
     MC.ui.composer.update();
     let result;
+    let refs = [];
+    let read = [];
+    let textContents = {};
     try {
+      if (files.length) {
+        const att = await readAttachments(files);
+        if (!att) return false;
+        ({ refs, read } = att);
+      }
+      if (ctrl.signal.aborted) return false;
+      const images = Object.fromEntries(read.filter((r) => r.ref.kind === 'image').map((r) => [r.ref.id, r.record.data]));
+      textContents = textContentsOf(read);
+      const c = cfg();
       result = await state.runner.route({
         text, attachments: refs, images, textContents,
         settings: MC.router.withDefaults(c.router),
         models: state.models, deciders: state.deciders, starred: c.starredDeciders,
         selection: currentModelIds().filter((id) => id !== MC.router.NATIVE_ID),
         filters: c.pickerFilters,
-        systemPrompt: promptHolder().systemPrompt,
-        contextNote: contextNote(state.conv),
+        systemPrompt: startHolder.systemPrompt,
+        contextNote: contextNote(startConv),
         signal: ctrl.signal,
       });
     } catch (e) {
@@ -321,24 +344,35 @@
       return false;
     }
     let { route, picks } = result;
-    if (MC.router.withDefaults(c.router).preview) {
+    const idOf = (c) => (c ? c.id : null);
+    const changed = () => idOf(state.conv) !== idOf(startConv);
+    const discard = (message) => {
+      keepUnsentCost(startConv || startHolder, route);
+      if (message) toast(message, 'warn');
+      return false;
+    };
+    if (changed()) return discard('Chat changed — message not sent');
+    if (MC.router.withDefaults(cfg().router).preview) {
       const choice = await MC.ui.router.preview(result);
-      if (!choice) return false;
+      if (changed()) return discard('Chat changed — message not sent');
+      if (!choice) return discard();
       if (choice.action === 'selection') {
-        if (files.length) return sendWithAttachments(text, files);
-        return !!sendBroadcast(text);
+        const sent = files.length ? await sendWithAttachments(text, files) : !!sendBroadcast(text);
+        // The decision was paid for: it counts in the chat the message went to.
+        keepUnsentCost(sent ? state.conv : startConv || startHolder, route);
+        return sent;
       }
       picks = choice.picks;
       const pOf = new Map(route.picks.map((x) => [x.modelId, x.p]));
       route = Object.assign({}, route, { picks: picks.map((m) => ({ modelId: m.id, p: pOf.has(m.id) ? pOf.get(m.id) : null })) });
     }
-    if (blockedByBusy()) return false;
+    if (blockedByBusy()) return discard();
     const conv = ensureConv();
     const laneIds = MC.conv.ensureLanes(conv, picks.map((m) => ({ id: m.id, name: m.name })));
-    if (!await storeAttachments(read)) return false;
+    if (!await storeAttachments(read)) return discard();
     // Image capability was enforced by the pool: no lane is "incapable".
     const { inputs, delivery } = MC.attach.buildInputs({ text, refs, textContents, laneIds, incapableIds: [], choice: null });
-    const p = sendTurn('broadcast', inputs, { attachments: refs, delivery, route });
+    const p = sendTurn('broadcast', inputs, { attachments: refs, delivery, route }, conv);
     refresh();
     if (p) p.catch(() => {});
     return true;
@@ -382,6 +416,7 @@
   }
 
   async function openConversation(id) {
+    abortRoute(); // a message being routed belongs to the chat it was written in
     // A chat with answers still streaming must keep using the object the runner writes into.
     const live = state.runner.liveConversation(id);
     const conv = live || await state.store.get(id);
@@ -393,6 +428,7 @@
   }
 
   function newChat() {
+    abortRoute();
     state.conv = null;
     state.draft = {};
     const def = cfg().defaultPresetId;
@@ -406,6 +442,7 @@
   }
 
   async function deleteConversation(id) {
+    if (state.conv && state.conv.id === id) abortRoute();
     deleted.add(id);
     state.runner.stopConversation(id);
     await state.store.deleteConversation(id);
@@ -425,6 +462,7 @@
   }
 
   async function importConversations(text) {
+    abortRoute();
     const data = MC.storage.parseImport(text);
     for (const a of data.attachments) await state.store.putAttachment(a);
     state.presets.importMany(data.presets);
@@ -441,6 +479,7 @@
   }
 
   async function forkAt(turnIndex, onlyLaneId) {
+    abortRoute();
     const f = MC.conv.fork(state.conv, turnIndex, { onlyLaneId });
     await state.store.put(f);
     state.conv = f;
