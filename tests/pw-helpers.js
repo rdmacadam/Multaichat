@@ -87,8 +87,9 @@ async function mockOpenRouter(page, opts = {}) {
     }
     const sys = body.messages[0] && body.messages[0].role === 'system' ? body.messages[0].content : '';
     const text = sys.startsWith('Summarize') ? '- Tokyo first\n- Two models asked questions' : (ANSWERS[body.model] || 'OK from ' + body.model);
+    const answer = opts.longAnswers && !sys.startsWith('Summarize') ? Array(60).fill(text).join('\n\n') : text;
     await new Promise((r) => setTimeout(r, opts.delay != null ? opts.delay : 150));
-    return route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'text/event-stream' }, CORS), body: sse(text, body.model === 'openrouter/auto' ? 'openai/gpt-6' : null) });
+    return route.fulfill({ status: 200, headers: Object.assign({ 'content-type': 'text/event-stream' }, CORS), body: sse(answer, body.model === 'openrouter/auto' ? 'openai/gpt-6' : null) });
   });
 }
 

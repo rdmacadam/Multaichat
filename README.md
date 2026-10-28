@@ -32,6 +32,7 @@ Plain HTML/CSS/JavaScript with no build step and no dependencies. It runs entire
 - **Fork** a chat from any turn, or **continue with just one model**.
 - **Retry** a single answer. Earlier versions are kept under "previous".
 - **Fullscreen:** ⤢ on an answer (or double-click its header) shows it full-window at reading width. **←/→** flip to the other models' answers to the same message; `Esc` closes.
+- **Compare columns** (desktop): switch **▤ By message / ▥ Compare** above the chat. Compare shows one column per model, each holding that model's own thread and scrolling on its own. Hide models with 👁 (remembered per chat; bring them back from "Hidden:"). Click **Message N** in any column to line up all columns at that message.
 - **TL;DR:** a short bullet summary written by a summary model you choose.
 - **Fusion:** one merged answer organized by topic, showing which models agree, where they disagree, and points only one model made. Under each topic, **Show sources** displays each model's original wording. Quotes that don't appear word-for-word in a model's answer are marked *paraphrased*.
 - History is kept in your browser (IndexedDB), with **export/import** to JSON. There's a light and a dark theme, and the layout works on phones: the model columns become swipeable tabs.

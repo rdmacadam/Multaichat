@@ -180,10 +180,64 @@ const cases = {
     assert.equal(await count(page, '.compare-col'), 3);
     assert.equal(await count(page, '.hidden-chip'), 0);
   },
+  async 'columns scroll independently'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    await ask(page, 'Second');
+    await allDone(page, 2);
+    await toColumns(page);
+    const bodies = page.locator('.compare-col .col-body');
+    const before = await bodies.evaluateAll((els) => els.map((e) => e.scrollTop));
+    assert.ok(before.every((t) => t > 0), 'columns start at the bottom: ' + before);
+    await bodies.first().evaluate((e) => { e.scrollTop = 0; });
+    const after = await bodies.evaluateAll((els) => els.map((e) => e.scrollTop));
+    assert.equal(after[0], 0);
+    assert.deepEqual(after.slice(1), before.slice(1));
+  },
+
+  async 'clicking Message 2 aligns all columns'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    await ask(page, 'Second');
+    await allDone(page, 2);
+    const turn2 = await page.evaluate(() => MC.app.state.conv.turns[1].id);
+    await toColumns(page);
+    await page.locator('.compare-col .col-body').evaluateAll((els) => els.forEach((e, i) => { e.scrollTop = i * 500; }));
+    await page.locator(`.compare-col >> nth=0 >> .msg-mark[data-turn="${turn2}"]`).click();
+    const gaps = await page.evaluate((id) => [...document.querySelectorAll('.compare-col .col-body')].map((b) =>
+      b.querySelector(`.msg-mark[data-turn="${id}"]`).getBoundingClientRect().top - b.getBoundingClientRect().top), turn2);
+    assert.ok(gaps.every((g) => Math.abs(g) <= 2), 'marker offsets ' + gaps);
+  },
+
+  async 'streaming text appears in its column'(page) {
+    await ask(page, 'Warm up');
+    await page.waitForFunction(() => document.querySelectorAll('.turn').length === 1 && !document.querySelector('.cell.status-streaming'));
+    await toColumns(page);
+    await ask(page);
+    await page.waitForSelector('.col-answer.status-streaming');
+    await page.waitForFunction(() => document.querySelectorAll('.col-answer').length === 6 && !document.querySelector('.col-answer.status-streaming'));
+    const cols = await page.locator('.compare-col').evaluateAll((els) => els.map((c) => [...c.querySelectorAll('.col-answer .md')].pop().textContent.trim()));
+    await toRows(page);
+    const cells = await page.locator('.turn').nth(1).locator('.cell .md').allTextContents();
+    assert.deepEqual(cols, cells.map((t) => t.trim()));
+  },
+
+  async 'switch view while streaming'(page) {
+    await ask(page);
+    await page.waitForSelector('.cell.status-streaming');
+    await toColumns(page);
+    await toRows(page);
+    await allDone(page, 1);
+    assert.equal(await count(page, '.turn .cell.status-done'), 3);
+  },
 };
 cases['phone width renders rows even with Compare saved'].init = { 'mc.settings': JSON.stringify({ chatView: 'columns' }) };
 cases['columns keep min width'].init = { 'mc.settings': JSON.stringify({ selected: SIX }) };
 cases['fullscreen follows a streaming answer'].opts = { delay: 1500 };
+cases['columns scroll independently'].opts = { longAnswers: true };
+cases['clicking Message 2 aligns all columns'].opts = { longAnswers: true };
+cases['streaming text appears in its column'].opts = { delay: 1500 };
+cases['switch view while streaming'].opts = { delay: 1500 };
 
 (async () => {
   const browser = await chromium.launch();

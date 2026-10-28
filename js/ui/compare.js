@@ -61,13 +61,50 @@
         h('button', { class: 'chip-x', 'aria-label': 'Show ' + shortName(l.modelName), title: 'Show again', onclick: () => MC.app.toggleLaneHidden(l.id) }, 'show'))));
   }
 
+  // Scroll position per chat and lane: { top, bottom } where bottom means the
+  // column was (near) its end and should follow new text.
+  const scrolls = new Map();
+  const NEAR = 120;
+  const atBottom = (b) => b.scrollHeight - b.scrollTop - b.clientHeight < NEAR;
+  const key = (conv, laneId) => conv.id + ':' + laneId;
+
+  function remember(conv, body, laneId) {
+    scrolls.set(key(conv, laneId), { top: body.scrollTop, bottom: atBottom(body) });
+  }
+
+  function restore(conv, body, laneId) {
+    const s = scrolls.get(key(conv, laneId));
+    body.scrollTop = !s || s.bottom ? body.scrollHeight : s.top;
+  }
+
   function render(conv, root) {
     const list = hiddenList(conv);
     const bar = root.querySelector('.view-bar');
     if (list && bar) bar.append(list);
     const cols = visibleColumns(conv);
     root.append(h('div', { class: 'compare' }, cols.map((l, i) => column(conv, l, i, cols.length === 1))));
-    root.querySelectorAll('.col-body').forEach((b) => { b.scrollTop = b.scrollHeight; });
+    root.querySelectorAll('.compare-col').forEach((col) => {
+      const body = col.querySelector('.col-body');
+      const laneId = col.dataset.lane;
+      restore(conv, body, laneId);
+      body.addEventListener('scroll', () => remember(conv, body, laneId), { passive: true });
+    });
+  }
+
+  // Scrolls every column so its marker for turnId is at the top; a column
+  // without that message goes to its latest earlier one (or the top).
+  function alignTo(turnId) {
+    const conv = MC.app.state.conv;
+    const target = conv && MC.conv.turnById(conv, turnId);
+    if (!target) return;
+    document.querySelectorAll('#chat .compare-col .col-body').forEach((body) => {
+      const marks = [...body.querySelectorAll('.msg-mark')].filter((m) => {
+        const t = MC.conv.turnById(conv, m.dataset.turn);
+        return t && t.index <= target.index;
+      });
+      const mark = marks[marks.length - 1];
+      body.scrollTop = mark ? body.scrollTop + mark.getBoundingClientRect().top - body.getBoundingClientRect().top : 0;
+    });
   }
 
   function updateCell(conv, turnId, laneId) {
@@ -77,11 +114,12 @@
     const lane = MC.conv.laneById(conv, laneId);
     if (!el || !turn || !lane) { chat().render(conv); return; }
     const r = turn.responses[laneId];
+    const body = el.closest('.col-body');
+    const follow = body && atBottom(body);
     if (r.status === 'streaming' && el.classList.contains('status-streaming')) el.querySelector('.md').innerHTML = answerBody(r);
     else el.replaceWith(answerEl(conv, turn, lane));
+    if (follow) body.scrollTop = body.scrollHeight;
   }
-
-  function alignTo() {}
 
   MC.ui = MC.ui || {};
   MC.ui.compare = { render, updateCell, alignTo, visibleColumns };
