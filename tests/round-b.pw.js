@@ -678,12 +678,38 @@ const cases = {
     await allDone(page, 3);
     assert.equal(page.decisions.length, 1);
   },
+  async 're-route with the selection pool chooses from the whole selection again'(page) {
+    const sel = JSON.parse(await page.evaluate(() => localStorage.getItem('mc.settings'))).selected;
+    await ask(page, 'First');
+    await allDone(page, 1);
+    assert.deepEqual(Object.keys(page.decisions[0].questions.pick.criteria).sort(), sel.slice().sort());
+    assert.equal((await convInfo(page)).active.length, 2, 'the chat holds the 2 picks');
+    await reroute(page);
+    await ask(page, 'Second');
+    await allDone(page, 2);
+    assert.equal(page.decisions.length, 2);
+    assert.deepEqual(Object.keys(page.decisions[1].questions.pick.criteria).sort(), sel.slice().sort(), 'the re-route sees all selected models, not only the previous picks');
+  },
+
+  async 'native re-route with the selection pool still has models'(page) {
+    await ask(page, 'First');
+    await allDone(page, 1);
+    await reroute(page);
+    await ask(page, 'Second');
+    await allDone(page, 2);
+    assert.equal(await page.locator('.toast').filter({ hasText: 'no models to route to' }).count(), 0);
+    const chat = page.requests.filter((r) => r.stream);
+    assert.equal(chat.length, 2);
+    assert.equal(chat[1].plugins.find((x) => x.id === 'auto-router').allowed_models.length, 4);
+  },
 };
 cases['starred deciders missing from the catalog are greyed'].opts = { noDeciders: true };
 cases['the router picks once: the first message creates only the picked columns'].init = routerInit({ mode: 'auto', count: 2, pool: 'catalog' });
 cases['later messages go to the picked models without a new decision'].init = routerInit({ mode: 'auto', count: 2, pool: 'catalog' });
 cases['re-route next makes one new decision and replaces unpicked models'].init = routerInit({ mode: 'auto', count: 2, pool: 'catalog' });
 cases['turning the router on in an existing chat routes nothing until re-route'].init = routerInit({ mode: 'auto', count: 2, pool: 'catalog' });
+cases['re-route with the selection pool chooses from the whole selection again'].init = routerInit({ mode: 'auto', count: 2, pool: 'selection' }, { selected: ['anthropic/claude-sonnet-5', 'openai/gpt-6', 'google/gemini-3-pro', 'x-ai/grok-5'] });
+cases['native re-route with the selection pool still has models'].init = routerInit({ mode: 'native', pool: 'selection' }, { selected: ['anthropic/claude-sonnet-5', 'openai/gpt-6', 'google/gemini-3-pro', 'x-ai/grok-5'] });
 cases['auto mode routes to the top N and shows the route bar'].init = routerInit({ mode: 'auto', count: 2, pool: 'catalog' });
 cases['an image is never routed to a model without image input'].init = routerInit({ mode: 'auto', count: 3, pool: 'catalog' });
 cases['picker filters restrict the decision candidates'].init = routerInit({ mode: 'auto', count: 3 }, { pickerFilters: { maxIn: '', maxOut: '', minContext: '', images: false, files: true } });

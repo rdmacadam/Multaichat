@@ -84,6 +84,7 @@ async function loads(browser, url) {
       ['browser Round A', 'node', ['tests/round-a.pw.js']],
       ['browser Round B', 'node', ['tests/round-b.pw.js']],
       ['browser answer views', 'node', ['tests/view.pw.js']],
+      ['browser router combinations', 'node', ['tests/router-combos.pw.js']],
     ]) {
       const r = spawnSync(cmd, args, { cwd: REPO, encoding: 'utf8' });
       const out = (r.stdout || '') + (r.stderr || '');

@@ -469,3 +469,12 @@ test('candidates never include openrouter/free or safety classifiers', () => {
   const r = Router.candidates(pool, { mode: 'diverse', pool: 'catalog', filters: { maxIn: '0', maxOut: '0' }, attachments: [] });
   assert.deepEqual(r.list.map((m) => m.id), ['poolside/laguna-s-2.1:free']);
 });
+
+test('a decider with unknown context (0) still gets candidates, sized for 16k', () => {
+  const pool = models.slice(0, 30);
+  const d = { id: 'respan/span-01-lite:free', context: 0, images: false, free: true };
+  const r = Router.decisionRequest({ mode: 'auto', candidates: pool, decider: d, text: 'Hello', attachments: [], images: {} });
+  assert.ok(r.candidateIds.length >= 2, 'got ' + r.candidateIds.length);
+  const chars = JSON.stringify(r.state).length + JSON.stringify(r.questions).length;
+  assert.ok(chars / 4 <= 16384 * 0.6, 'fits a 16k budget');
+});

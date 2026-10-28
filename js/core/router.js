@@ -178,7 +178,9 @@
 
   // ---- decision request (§5.4) ----
 
-  const budgetChars = (decider) => Math.floor((Number(decider && decider.context) || 0) * BUDGET_SHARE) * 4;
+  // Some deciders list no context length (0): size their requests for 16k.
+  const UNKNOWN_CONTEXT = 16384;
+  const budgetChars = (decider) => Math.floor((Number(decider && decider.context) || UNKNOWN_CONTEXT) * BUDGET_SHARE) * 4;
 
   function fmtPrice(v) { return v == null ? '?' : String(Number(v.toPrecision(3))); }
 

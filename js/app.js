@@ -365,7 +365,9 @@
         text, attachments: refs, images, textContents,
         settings: MC.router.withDefaults(c.router),
         models: state.models, deciders: state.deciders, starred: c.starredDeciders,
-        selection: currentModelIds().filter((id) => id !== MC.router.NATIVE_ID),
+        // The user's saved selection, not the chat's columns: after the first
+        // routed message those are only the previous picks.
+        selection: c.selected.filter((id) => id !== MC.router.NATIVE_ID),
         filters: c.pickerFilters,
         systemPrompt: startHolder.systemPrompt,
         contextNote: contextNote(startConv),
