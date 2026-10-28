@@ -31,6 +31,7 @@ Plain HTML/CSS/JavaScript with no build step and no dependencies. It runs entire
 - **Each model keeps its own thread.** A model only sees the messages that were sent to it. Columns that weren't asked in a turn say so.
 - **Fork** a chat from any turn, or **continue with just one model**.
 - **Retry** a single answer. Earlier versions are kept under "previous".
+- **Fullscreen:** ⤢ on an answer (or double-click its header) shows it full-window at reading width. **←/→** flip to the other models' answers to the same message; `Esc` closes.
 - **TL;DR:** a short bullet summary written by a summary model you choose.
 - **Fusion:** one merged answer organized by topic, showing which models agree, where they disagree, and points only one model made. Under each topic, **Show sources** displays each model's original wording. Quotes that don't appear word-for-word in a model's answer are marked *paraphrased*.
 - History is kept in your browser (IndexedDB), with **export/import** to JSON. There's a light and a dark theme, and the layout works on phones: the model columns become swipeable tabs.
@@ -88,7 +89,7 @@ Plain HTML/CSS/JavaScript with no build step and no dependencies. It runs entire
 ```
 npm run check    # production check: assets/paths for GitHub Pages, page loads under /Multaichat/ and from file://, all suites
 npm test         # unit tests for js/core and the markdown renderer (Node 22+, no deps)
-npm run smoke    # Playwright browser tests (flow, regressions, Round A features, and `tests/round-b.pw.js` for the cost counter and router) against a mocked OpenRouter
+npm run smoke    # Playwright browser tests (flow, regressions, Round A features, `tests/round-b.pw.js` for the cost counter and router, `tests/view.pw.js` for answer views) against a mocked OpenRouter
 ```
 
 Code layout: `js/core/*` holds the logic and has no page-handling code, so it is unit-tested in Node. `js/ui/*` builds the page. `js/app.js` connects the two. Scripts are loaded as plain `<script>` tags rather than ES modules, so the app also works when opened from disk.

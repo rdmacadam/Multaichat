@@ -151,9 +151,11 @@
     }
     const paid = r.status === 'error' && r.errorStatus === 429 ? paidVariant(lane) : null;
     return h('div', base,
-      h('div', { class: 'cell-head' }, h('span', { class: 'cell-model' }, shortName(lane.modelName),
+      h('div', { class: 'cell-head', title: 'Double-click for fullscreen', ondblclick: (e) => { if (!e.target.closest('button')) MC.ui.fullscreen.open(conv, turn.id, lane.id); } },
+        h('span', { class: 'cell-model' }, shortName(lane.modelName),
         textOnly ? h('span', { class: 'badge tag-text-only', title: 'Attachments were left out for this model' }, 'text only') : null,
-        best ? h('span', { class: 'badge best', title: 'Picked by the judge as the best answer' }, '🏆 best' + (typeof turn.judge.p === 'number' ? ' (' + Math.round(turn.judge.p * 100) + ' %)' : '')) : null), statusLine(r)),
+        best ? h('span', { class: 'badge best', title: 'Picked by the judge as the best answer' }, '🏆 best' + (typeof turn.judge.p === 'number' ? ' (' + Math.round(turn.judge.p * 100) + ' %)' : '')) : null), statusLine(r),
+        h('button', { class: 'icon small fs-open', 'aria-label': 'Fullscreen ' + shortName(lane.modelName), title: 'Fullscreen (←/→ to flip models)', onclick: () => MC.ui.fullscreen.open(conv, turn.id, lane.id) }, '⤢')),
       uniqueInputs > 1 && !textOnly ? h('div', { class: 'cell-input' }, h('span', { class: 'muted small' }, 'You: '), displayText(turn.inputs[lane.id])) : null,
       h('div', { class: 'md', html: r.content ? MC.md.render(r.content) : r.status === 'streaming' ? '<p class="muted">…</p>' : '' }),
       r.servedModel ? h('div', { class: 'served muted small', title: r.servedModel }, '→ answered by ' + modelShort(r.servedModel)) : null,
@@ -368,6 +370,7 @@
           routeEl.replaceWith(next);
         }
       }
+      MC.ui.fullscreen.update(conv, turnId, laneId);
       if (isMobile() && col !== view.activeCol) {
         view.unread.add(laneId);
         const head = root.querySelector(`.lane-head[data-lane="${laneId}"]`);
