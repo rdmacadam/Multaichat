@@ -23,6 +23,7 @@
     pickerFilters: Object.freeze({ maxIn: '', maxOut: '', minContext: '', images: false, files: false }),
     defaultPresetId: null,
     pdfMode: 'auto',
+    chatView: 'rows',
     router: Object.freeze({
       enabled: false,
       mode: 'auto',

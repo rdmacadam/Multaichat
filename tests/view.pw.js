@@ -6,17 +6,18 @@ const { mockOpenRouter, serve } = require('./pw-helpers');
 
 let base;
 
-async function open(browser, opts = {}) {
+async function open(browser, opts = {}, init) {
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const page = await context.newPage();
   page.errors = [];
   page.on('pageerror', (e) => page.errors.push(e.message));
   await mockOpenRouter(page, opts);
-  await page.addInitScript(() => {
+  await page.addInitScript((initial) => {
     if (sessionStorage.getItem('seeded')) return;
     sessionStorage.setItem('seeded', '1');
     localStorage.setItem('mc.apiKey', 'sk-or-v1-test');
-  });
+    for (const [k, v] of Object.entries(initial || {})) localStorage.setItem(k, v);
+  }, init);
   await page.goto(base);
   await page.waitForSelector('.empty-state');
   return page;
@@ -29,6 +30,10 @@ async function ask(page, text = 'Hello') {
 const allDone = (page, turns) => page.waitForFunction((n) => document.querySelectorAll('.turn').length === n &&
   !document.querySelector('.cell.status-streaming'), turns);
 const dlg = (page) => page.locator('#answer-dialog');
+const toColumns = (page) => page.click('.view-switch [data-view="columns"]');
+const toRows = (page) => page.click('.view-switch [data-view="rows"]');
+const count = (page, sel) => page.locator(sel).count();
+const SIX = ['anthropic/claude-sonnet-5', 'openai/gpt-6', 'google/gemini-3-pro', 'x-ai/grok-5', 'deepseek/deepseek-v4', 'qwen/qwen4-235b'];
 const shownModel = async (page) => (await dlg(page).locator('.fs-model').textContent()).trim();
 const shownText = async (page) => (await dlg(page).locator('.fs-body .md').textContent()).trim();
 
@@ -83,7 +88,59 @@ const cases = {
     const cellText = (await page.locator('.turn').first().locator('.cell').nth(0).locator('.md').textContent()).trim();
     assert.equal(await shownText(page), cellText);
   },
+  async 'switch to Compare shows one column per model and survives reload'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    const lanes = await count(page, '.lane-head');
+    await toColumns(page);
+    await page.waitForSelector('.compare-col');
+    assert.equal(await count(page, '.compare-col'), lanes);
+    assert.equal(await count(page, '.turns'), 0);
+    assert.equal(await page.getAttribute('.view-switch [data-view="columns"]', 'aria-pressed'), 'true');
+    await page.reload();
+    await page.waitForSelector('.compare-col');
+    assert.equal(await count(page, '.compare-col'), lanes);
+    await toRows(page);
+    await page.waitForSelector('.turns');
+    assert.equal(await count(page, '.compare'), 0);
+  },
+
+  async 'a model not asked in a turn has no marker for it'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    await page.locator('#topbar .chip').nth(1).locator('.chip-x').click();
+    await ask(page, 'Second');
+    await allDone(page, 2);
+    await toColumns(page);
+    const cols = page.locator('.compare-col');
+    assert.equal(await cols.nth(0).locator('.msg-mark').count(), 2);
+    assert.equal(await cols.nth(1).locator('.msg-mark').count(), 1);
+    assert.equal(await cols.nth(0).locator('.col-answer .md').first().textContent() !== '', true);
+  },
+
+  async 'phone width renders rows even with Compare saved'(page) {
+    await ask(page);
+    await page.waitForFunction(() => document.querySelectorAll('.compare .col-answer').length === 3 && !document.querySelector('.col-answer.status-streaming'));
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.waitForSelector('.turns');
+    assert.equal(await count(page, '.compare'), 0);
+    assert.equal(await page.locator('.view-bar').isVisible(), false);
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.waitForSelector('.compare');
+  },
+
+  async 'columns keep min width'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    await toColumns(page);
+    const widths = await page.locator('.compare-col').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width));
+    assert.equal(widths.length, 6);
+    assert.ok(widths.every((w) => w >= 319), 'widths ' + widths.join(','));
+    assert.ok(await page.evaluate(() => { const c = document.querySelector('.compare'); return c.scrollWidth > c.clientWidth; }));
+  },
 };
+cases['phone width renders rows even with Compare saved'].init = { 'mc.settings': JSON.stringify({ chatView: 'columns' }) };
+cases['columns keep min width'].init = { 'mc.settings': JSON.stringify({ selected: SIX }) };
 cases['fullscreen follows a streaming answer'].opts = { delay: 1500 };
 
 (async () => {
@@ -96,7 +153,7 @@ cases['fullscreen follows a streaming answer'].opts = { delay: 1500 };
     if (only && !name.includes(only)) continue;
     let page;
     try {
-      page = await open(browser, fn.opts || {});
+      page = await open(browser, fn.opts || {}, fn.init);
       await fn(page);
       assert.deepEqual(page.errors, [], 'no page errors');
       console.log('ok - ' + name);

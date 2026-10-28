@@ -333,9 +333,13 @@
     const kept = saveDrafts(root);
     clear(root);
     view.pending.clear();
+    root.classList.remove('compare-mode');
     if (!app().state.settings.getKey()) { firstRun(root); return; }
     root.append(MC.ui.presets.chip());
     if (!conv || !conv.turns.length) { emptyState(root); return; }
+    root.append(viewBar());
+    root.classList.toggle('compare-mode', isCompare());
+    if (isCompare()) { MC.ui.compare.render(conv, root); return; }
     const lanes = visibleLanes(conv);
     if (view.activeCol >= lanes.length) view.activeCol = 0;
     root.append(laneBar(conv, lanes), h('div', { class: 'turns' }, conv.turns.map((t) => turnEl(conv, t, lanes))));
@@ -381,7 +385,25 @@
     if (stick) root.scrollTop = root.scrollHeight;
   }
 
+  // Compare columns are a desktop view; phones keep the rows with lane tabs.
+  function isCompare() {
+    return app().state.settings.get().chatView === 'columns' && !isMobile();
+  }
+
+  function viewBar() {
+    const current = isCompare() ? 'columns' : 'rows';
+    const btn = (v, label, title) => h('button', {
+      class: 'ghost small', dataset: { view: v }, 'aria-pressed': String(current === v), title,
+      onclick: () => app().setChatView(v),
+    }, label);
+    return h('div', { class: 'view-bar' },
+      h('div', { class: 'view-switch', role: 'group', 'aria-label': 'Layout' },
+        btn('rows', '▤ By message', 'All answers to each message side by side'),
+        btn('columns', '▥ Compare', 'One column per model, each scrolling on its own')));
+  }
+
   function updateCell(conv, turnId, laneId) {
+    if (isCompare()) { MC.ui.compare.updateCell(conv, turnId, laneId); MC.ui.fullscreen.update(conv, turnId, laneId); return; }
     view.pending.set(turnId + ':' + laneId, { conv, turnId, laneId });
     if (!view.raf) view.raf = requestAnimationFrame(flush);
   }
@@ -445,5 +467,9 @@
   }, 200));
 
   MC.ui = MC.ui || {};
-  MC.ui.chat = { render, updateCell, updateDerived, focusLane, setActiveCol, visibleLanes };
+  window.matchMedia('(max-width: 800px)').addEventListener('change', () => {
+    if (app().state.settings.get().chatView === 'columns') render(app().state.conv);
+  });
+
+  MC.ui.chat = { render, updateCell, updateDerived, focusLane, setActiveCol, visibleLanes, isCompare, displayText, attachmentEl };
 })(window.MC);

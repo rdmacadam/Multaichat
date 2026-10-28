@@ -164,6 +164,11 @@
   // The chat's prompt state: the conversation, or the draft before it exists.
   function promptHolder() { return state.conv || state.draft; }
 
+  function setChatView(v) {
+    state.settings.set({ chatView: v === 'columns' ? 'columns' : 'rows' });
+    MC.ui.chat.render(state.conv);
+  }
+
   function setChatSystemPrompt(text, presetId) {
     if (state.conv) { MC.conv.setSystemPrompt(state.conv, text, presetId); save(state.conv); }
     else {
@@ -557,6 +562,7 @@
   }
 
   MC.app = {
+    setChatView,
     state, start, refresh, modelById, refreshModels, refreshDeciders, openModelPicker, setSelection, addModel, removeModel,
     sendBroadcast, sendTargeted, sendBatch, openConversation, newChat, deleteConversation, renameConversation,
     importConversations, forkAt, save, ensureConv, applyPreset, setChatSystemPrompt, promptHolder, sendWithAttachments, updateCost,

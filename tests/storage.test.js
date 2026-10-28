@@ -206,3 +206,7 @@ test('defaults include router and starred deciders', () => {
     'perplexity/pplx-decider-v1.2', 'baseten/mammoth-1:free', 'baseten/elephant-1:free']);
   assert.deepEqual(storage.createSettings(memoryStorage()).get().router, storage.DEFAULT_SETTINGS.router);
 });
+
+test('defaults include chatView rows', () => {
+  assert.equal(storage.DEFAULT_SETTINGS.chatView, 'rows');
+});
