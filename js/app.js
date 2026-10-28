@@ -506,7 +506,29 @@
     });
   }
 
+  // Some mobile browsers (Firefox for Android) shrink only the visual
+  // viewport when the on-screen keyboard opens, so 100dvh stays full height
+  // and the composer ends up under the keyboard. Size the page to the visible
+  // area instead. Pinch-zoom also shrinks the visual viewport: skip that.
+  function fitToVisualViewport() {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const root = document.documentElement;
+    const apply = () => {
+      if (Math.abs((vv.scale || 1) - 1) > 0.01) return;
+      root.style.setProperty('--app-h', Math.round(vv.height) + 'px');
+      if (window.scrollY) window.scrollTo(0, 0);
+    };
+    vv.addEventListener('resize', apply);
+    vv.addEventListener('scroll', apply);
+    apply();
+    document.addEventListener('focusin', (e) => {
+      if (e.target && e.target.closest && e.target.closest('#composer')) setTimeout(() => e.target.scrollIntoView({ block: 'nearest' }), 100);
+    });
+  }
+
   async function start() {
+    fitToVisualViewport();
     state.settings = MC.storage.createSettings();
     state.presets = MC.presets.createPresetStore(MC.storage.defaultLs());
     MC.ui.settings.applyTheme(cfg().theme);

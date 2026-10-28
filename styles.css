@@ -30,7 +30,7 @@
 html, body { margin: 0; height: 100%; }
 body {
   font: 15px/1.5 var(--font); background: var(--bg); color: var(--text);
-  display: grid; grid-template-rows: auto 1fr auto; height: 100dvh; overflow: hidden;
+  display: grid; grid-template-rows: auto 1fr auto; height: 100dvh; height: var(--app-h, 100dvh); overflow: hidden;
 }
 a { color: var(--accent); }
 button, input, select, textarea { font: inherit; color: inherit; }

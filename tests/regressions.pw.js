@@ -134,6 +134,32 @@ const cases = {
     assert.equal(await page.locator('.turn').nth(0).locator('.inline-reply').last().inputValue(), 'draft for gemini');
   },
 
+  // Firefox for Android shrinks only the visual viewport when the keyboard
+  // opens; the composer must follow the visible area, not the layout height.
+  async 'composer stays above the on-screen keyboard'(browser) {
+    const context = await browser.newContext({ viewport: { width: 390, height: 800 }, isMobile: true, hasTouch: true });
+    const page = await context.newPage();
+    await mockOpenRouter(page);
+    await page.addInitScript(() => {
+      localStorage.setItem('mc.apiKey', 'sk-or-v1-test');
+      const vv = new EventTarget();
+      Object.assign(vv, { width: 390, height: 800, offsetTop: 0, offsetLeft: 0, pageTop: 0, pageLeft: 0, scale: 1 });
+      Object.defineProperty(window, 'visualViewport', { configurable: true, get: () => vv });
+      window.__setKeyboard = (h) => { vv.height = h; vv.dispatchEvent(new Event('resize')); };
+    });
+    await page.goto(base);
+    await page.waitForSelector('#prompt');
+    const bottom = () => page.evaluate(() => document.getElementById('composer').getBoundingClientRect().bottom);
+    await page.focus('#prompt');
+    await page.evaluate(() => window.__setKeyboard(450));
+    await page.waitForTimeout(50);
+    assert.ok(await bottom() <= 451, 'composer bottom ' + (await bottom()) + ' is under the keyboard (visible height 450)');
+    await page.evaluate(() => window.__setKeyboard(800));
+    await page.waitForTimeout(50);
+    assert.ok(Math.abs((await bottom()) - 800) <= 1, 'composer returns to the bottom when the keyboard closes');
+    await context.close();
+  },
+
   async 'offline start keeps the saved model choices'(browser) {
     const saved = { selected: ['qwen/qwen4-coder', 'x-ai/grok-5'], summaryModel: 'x-ai/grok-5', fusionModel: 'qwen/qwen4-coder' };
     const page = await open(browser, { failModels: true }, { 'mc.settings': JSON.stringify(saved) });
