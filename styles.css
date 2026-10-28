@@ -355,3 +355,4 @@ dialog.fullscreen { width: calc(100vw - 24px); max-width: none; height: calc(100
 .hidden-chip .chip-x { font-size: 12px; color: var(--accent); }
 .col-head .lane-hide { margin-left: auto; font-size: 14px; opacity: .7; }
 .col-head .lane-hide:disabled { opacity: .3; cursor: not-allowed; }
+.router-chip .router-reroute { background: none; border: 0; padding: 0 6px; color: var(--accent); font-size: 13px; cursor: pointer; }

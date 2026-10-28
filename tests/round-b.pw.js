@@ -40,6 +40,8 @@ const PNG = { name: 'tiny.png', mimeType: 'image/png', buffer: Buffer.from('iVBO
 const chatModels = (page) => page.requests.filter((r) => r.stream).map((r) => r.model);
 const convInfo = (page) => page.evaluate(() => ({ active: MC.app.state.conv.lanes.filter((l) => l.active).map((l) => l.modelId) }));
 // localStorage seed for router settings (and other settings).
+// The router picks a chat's models once; this arms it for the next message.
+const reroute = (page) => page.click('.router-chip .router-reroute');
 const routerInit = (router, extra) => ({ 'mc.settings': JSON.stringify(Object.assign({ router: Object.assign({ enabled: true }, router) }, extra)) });
 
 const cases = {
@@ -363,6 +365,7 @@ const cases = {
     assert.match(bar, /d1-ultra/);
     assert.equal(chatModels(page).length, 2);
     opts.decideStatus['liquid/d1-ultra'] = 500;
+    await reroute(page);
     await ask(page, 'second');
     await allDone(page, 2);
     assert.equal(page.decisions.length, 4, 'two more tries, no third decider');
@@ -408,6 +411,7 @@ const cases = {
 
     // "Send to my selection instead" sends to the toolbar models without routing
     const before = page.decisions.length;
+    await reroute(page);
     await ask(page, 'All of you');
     await dlg.waitFor({ state: 'visible' });
     await dlg.getByRole('button', { name: 'Send to my selection instead' }).click();
@@ -433,9 +437,9 @@ const cases = {
     const lane = await page.evaluate(() => MC.app.state.conv.lanes.find((l) => l.modelId === 'openrouter/auto'));
     assert.equal(lane.modelName, 'OpenRouter Auto');
     assert.equal((await page.textContent('.cell.status-done .served')).trim(), '→ answered by GPT-6');
-    assert.equal(await page.locator('.turn .cell.not-routed').count(), selected.length);
+    assert.equal(await page.locator('.turn .cell.not-routed').count(), 0, 'the chat holds only the native lane');
     assert.match(await page.textContent('.route-bar'), /🧭 OpenRouter Auto · answered by GPT-6/);
-    // a second message: the native lane is not part of the pool
+    // a second message goes to the native lane with the same allowed pool, no new decision
     await ask(page, 'again');
     await allDone(page, 2);
     chat = page.requests.filter((r) => r.stream);
@@ -530,6 +534,7 @@ const cases = {
     await allDone(page, 1);
     const aId = await page.evaluate(() => MC.app.state.conv.id);
     const sent = chatModels(page).length;
+    await reroute(page);
     // New chat while routing in chat A
     await ask(page, 'SECRET for A');
     await routing();
@@ -562,6 +567,7 @@ const cases = {
     await allDone(page, 1);
     const aId = await page.evaluate(() => MC.app.state.conv.id);
     const sent = chatModels(page).length;
+    await reroute(page);
     await ask(page, 'SECRET for A');
     await dlg.waitFor({ state: 'visible' });
     await page.evaluate(() => MC.app.newChat());
@@ -589,6 +595,7 @@ const cases = {
     await allDone(page, 1);
     assert.equal(page.decisions.length, 2);
     assert.equal(await router(), 0.000004, 'the cancelled decision counts too');
+    await reroute(page);
     await ask(page, 'All of you');
     await dlg.waitFor({ state: 'visible' });
     await dlg.getByRole('button', { name: 'Send to my selection instead' }).click();
@@ -617,8 +624,66 @@ const cases = {
     assert.match(bar, / · free · /);
     assert.doesNotMatch(bar, /<\$0\.0001/);
   },
+  async 'the router picks once: the first message creates only the picked columns'(page) {
+    await ask(page, 'Plan a trip');
+    await allDone(page, 1);
+    const want = Object.keys(page.decisions[0].questions.pick.criteria).slice(0, 2);
+    const conv = await convInfo(page);
+    assert.deepEqual(conv.active.slice().sort(), want.slice().sort(), 'only the picks are in the chat');
+    assert.equal(await page.locator('.turn .cell.not-routed').count(), 0);
+  },
+
+  async 'later messages go to the picked models without a new decision'(page) {
+    await ask(page, 'Plan a trip');
+    await allDone(page, 1);
+    const want = Object.keys(page.decisions[0].questions.pick.criteria).slice(0, 2);
+    const before = page.requests.filter((r) => r.stream).length;
+    await ask(page, 'Make it 5 days');
+    await allDone(page, 2);
+    assert.equal(page.decisions.length, 1, 'no second decision');
+    assert.deepEqual(chatModels(page).slice(before).sort(), want.slice().sort());
+    assert.equal(await page.locator('.turn').nth(1).locator('.route-bar').count(), 0);
+    assert.match(await page.locator('.router-chip').textContent(), /Re-route next/);
+  },
+
+  async 're-route next makes one new decision and replaces unpicked models'(page) {
+    await ask(page, 'Plan a trip');
+    await allDone(page, 1);
+    await page.click('.router-chip .router-reroute');
+    assert.match(await page.locator('.router-chip').textContent(), /Next message is re-routed/);
+    await page.reload();
+    await page.waitForSelector('.turn');
+    assert.match(await page.locator('.router-chip').textContent(), /Next message is re-routed/, 'armed re-route survives reload');
+    await ask(page, 'Now something about code');
+    await allDone(page, 2);
+    assert.equal(page.decisions.length, 2);
+    const want = Object.keys(page.decisions[1].questions.pick.criteria).slice(0, 2);
+    const conv = await convInfo(page);
+    assert.deepEqual(conv.active.slice().sort(), want.slice().sort());
+    await ask(page, 'Thanks');
+    await allDone(page, 3);
+    assert.equal(page.decisions.length, 2, 'the following message is not routed again');
+  },
+
+  async 'turning the router on in an existing chat routes nothing until re-route'(page) {
+    await page.evaluate(() => { const s = MC.app.state.settings; s.set({ router: MC.router.withDefaults(Object.assign(s.get().router, { enabled: false })) }); MC.app.refresh(); });
+    await ask(page, 'Hello');
+    await allDone(page, 1);
+    await page.evaluate(() => { const s = MC.app.state.settings; s.set({ router: MC.router.withDefaults(Object.assign(s.get().router, { enabled: true })) }); MC.app.refresh(); });
+    await ask(page, 'Second');
+    await allDone(page, 2);
+    assert.equal(page.decisions.length, 0);
+    await page.click('.router-chip .router-reroute');
+    await ask(page, 'Third');
+    await allDone(page, 3);
+    assert.equal(page.decisions.length, 1);
+  },
 };
 cases['starred deciders missing from the catalog are greyed'].opts = { noDeciders: true };
+cases['the router picks once: the first message creates only the picked columns'].init = routerInit({ mode: 'auto', count: 2, pool: 'catalog' });
+cases['later messages go to the picked models without a new decision'].init = routerInit({ mode: 'auto', count: 2, pool: 'catalog' });
+cases['re-route next makes one new decision and replaces unpicked models'].init = routerInit({ mode: 'auto', count: 2, pool: 'catalog' });
+cases['turning the router on in an existing chat routes nothing until re-route'].init = routerInit({ mode: 'auto', count: 2, pool: 'catalog' });
 cases['auto mode routes to the top N and shows the route bar'].init = routerInit({ mode: 'auto', count: 2, pool: 'catalog' });
 cases['an image is never routed to a model without image input'].init = routerInit({ mode: 'auto', count: 3, pool: 'catalog' });
 cases['picker filters restrict the decision candidates'].init = routerInit({ mode: 'auto', count: 3 }, { pickerFilters: { maxIn: '', maxOut: '', minContext: '', images: false, files: true } });

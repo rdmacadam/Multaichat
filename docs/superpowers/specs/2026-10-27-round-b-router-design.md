@@ -291,7 +291,12 @@ reason; composer keeps text and attachments).
 
 ### 5.9 Send flow — `runner.route()` + app
 
-1. User sends from the composer to all models with the router on.
+1. User sends from the composer to all models with the router on, and the
+   chat needs routing: it is the chat's first message, or a re-route is
+   armed (`conv.rerouteNext`, set by "Re-route next" in the composer chip).
+   **The router picks a chat's models once**; every later message goes to
+   the chat's active lanes like a normal chat (no decision, no route bar).
+   (Amended 2026-10-28 at the user's request; it was every message.)
 2. Validate attachments (Round A), compute candidates. Empty → toast, stop.
 3. Native → skip to 6. Rules-only (Best free without decider) → skip to 5.
 4. Call `decide` with the first decider (15 s timeout via `AbortController`):
@@ -352,7 +357,11 @@ Changes are saved immediately; the toolbar button and composer chip update.
 
 ### 6.4 Composer and preview
 
-- Router on → chip `🧭 Diverse ×3 ✕` next to the target chip (✕ turns the
+- In a chat that already has messages, the chip reads `🧭 Routed · Re-route next`
+  (arms a re-route for the next message) or, when armed,
+  `🧭 Next message is re-routed ✕` (✕ cancels). The placeholder is the normal
+  "Ask all models…" unless the next message will be routed.
+- Router on (new chat) → chip `🧭 Diverse ×3 ✕` next to the target chip (✕ turns the
   router off); placeholder "Ask — the router picks 3 models…". A targeted
   composer message (↳ chip set) bypasses the router.
 - **Preview dialog** (`<dialog id="route-preview-dialog">`): the picks as
@@ -368,7 +377,10 @@ Changes are saved immediately; the toolbar button and composer chip update.
   plus the note (fallback reason / short pool) and "▾ candidates (n)" listing
   the ids sent. Rules-only: `🧭 Best free · picked by rules — <reason>`.
   Native: `🧭 OpenRouter Auto · answered by <model>`.
-- Cells of active lanes not picked: "— not routed this turn".
+- A new chat is created with only the picked models as lanes; on a re-route,
+  active lanes that were not picked are removed (inactive, history kept) and
+  `conv.rerouteNext` is cleared. Cells of lanes not asked in a routed turn
+  (e.g. models removed by that re-route) keep the "— not routed this turn" text.
 - Native cells: "→ answered by <name>" under the answer.
 - Judge: 🏆 badge on the winning cell; "Judge again" in the route bar.
 

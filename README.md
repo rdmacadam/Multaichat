@@ -65,14 +65,14 @@ Plain HTML/CSS/JavaScript with no build step and no dependencies. It runs entire
 | `Ctrl/⌘+Enter` | Send in the "Answer them together" panel |
 
 ## Notes
-- **Router.** Instead of picking models yourself, turn on 🧭 in the toolbar and let a decision model choose which models answer each message.
+- **Router.** Instead of picking models yourself, turn on 🧭 in the toolbar and let a decision model choose which models answer. It picks once, on a chat's first message; after that the chat continues with those models like any other chat. To let it pick again, click **Re-route next** on the 🧭 chip above the message box.
   - **Modes** (each has an ⓘ in the 🧭 panel):
     - *Full auto* — the decision model picks the best models for this message, weighing answer quality against price.
     - *Diverse perspectives* — strong models from different providers, so you see different viewpoints. Pairs well with Fusion.
     - *Best free* — only free models are considered, and a free decision model picks among them. If no free decision model works, the newest free models are picked by simple rules, so this mode stays free.
     - *Very best answer* — the strongest models for this message, ignoring price; optionally fuses their answers or lets a judge mark the best one (see extras below).
     - *Full manual* — you choose the models the router may pick from and the decision model; the decision model still picks among them.
-    - *OpenRouter native* — OpenRouter's own Auto Router picks one model per message from your allowed pool; the answer shows which model was used.
+    - *OpenRouter native* — OpenRouter's own Auto Router picks one model per request from your allowed pool; the answer shows which model was used.
   - **Pool:** pick from the whole catalog or only from the models in your toolbar. The picker filters (price, context, images, files) also apply, and a message with images never goes to a model that can't read them.
   - **Count:** how many models answer (1 to 8; OpenRouter native always uses 1, and your saved number comes back when you switch to another mode).
   - **Decision models and stars:** the decision models come live from OpenRouter. Star the ones you like; the router uses your default (or the first starred one) and tries one more starred model if it fails, then falls back to simple rules.

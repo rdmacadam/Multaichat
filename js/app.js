@@ -150,10 +150,11 @@
   }
 
   // ---------- conversations ----------
-  function ensureConv() {
+  // models: [{id, name}] for the new chat's lanes (default: the selection).
+  function ensureConv(models) {
     if (state.conv) return state.conv;
     const ids = cfg().selected;
-    state.conv = MC.conv.create(ids.map((id) => ({ id, name: (modelById(id) || { name: id }).name })));
+    state.conv = MC.conv.create(models || ids.map((id) => ({ id, name: (modelById(id) || { name: id }).name })));
     if (state.draft.systemPrompt) MC.conv.setSystemPrompt(state.conv, state.draft.systemPrompt, state.draft.presetId);
     if (state.draft.spentUnsent) state.conv.spentUnsent = state.draft.spentUnsent;
     state.draft = {};
@@ -163,6 +164,22 @@
   // ---------- presets & system prompt ----------
   // The chat's prompt state: the conversation, or the draft before it exists.
   function promptHolder() { return state.conv || state.draft; }
+
+  // The router picks a chat's models on its first message, and again only
+  // when a re-route is armed for the next message.
+  function needsRouting() {
+    if (!MC.router.withDefaults(cfg().router).enabled) return false;
+    const conv = state.conv;
+    return !conv || !conv.turns.length || !!conv.rerouteNext;
+  }
+
+  function armReroute(on) {
+    const conv = state.conv;
+    if (!conv) return;
+    if (on) conv.rerouteNext = true; else delete conv.rerouteNext;
+    save(conv);
+    MC.ui.composer.update();
+  }
 
   function setChatView(v) {
     state.settings.set({ chatView: v === 'columns' ? 'columns' : 'rows' });
@@ -378,6 +395,7 @@
       if (changed()) return discard('Chat changed — message not sent');
       if (!choice) return discard();
       if (choice.action === 'selection') {
+        if (startConv) delete startConv.rerouteNext;
         const sent = files.length ? await sendWithAttachments(text, files) : !!sendBroadcast(text);
         // The decision was paid for: it counts in the chat the message went to.
         keepUnsentCost(state.conv || startHolder, route);
@@ -388,8 +406,13 @@
       route = Object.assign({}, route, { picks: picks.map((m) => ({ modelId: m.id, p: pOf.has(m.id) ? pOf.get(m.id) : null })) });
     }
     if (blockedByBusy()) return discard();
-    const conv = ensureConv();
-    const laneIds = MC.conv.ensureLanes(conv, picks.map((m) => ({ id: m.id, name: m.name })));
+    // The router picks the chat's models: a new chat starts with only the
+    // picks, and a re-route removes the models it did not pick.
+    const pickModels = picks.map((m) => ({ id: m.id, name: m.name }));
+    const conv = ensureConv(pickModels);
+    const laneIds = MC.conv.ensureLanes(conv, pickModels);
+    for (const l of conv.lanes) if (l.active && !laneIds.includes(l.id)) MC.conv.removeLane(conv, l.id);
+    delete conv.rerouteNext;
     if (!await storeAttachments(read)) { keepUnsentCost(conv, route); return false; }
     // Image capability was enforced by the pool: no lane is "incapable".
     const { inputs, delivery } = MC.attach.buildInputs({ text, refs, textContents, laneIds, incapableIds: [], choice: null });
@@ -578,7 +601,7 @@
   }
 
   MC.app = {
-    setChatView, toggleLaneHidden,
+    setChatView, toggleLaneHidden, needsRouting, armReroute,
     state, start, refresh, modelById, refreshModels, refreshDeciders, openModelPicker, setSelection, addModel, removeModel,
     sendBroadcast, sendTargeted, sendBatch, openConversation, newChat, deleteConversation, renameConversation,
     importConversations, forkAt, save, ensureConv, applyPreset, setChatSystemPrompt, promptHolder, sendWithAttachments, updateCost,

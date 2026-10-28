@@ -29,7 +29,14 @@
   function routerOn() { return MC.router.withDefaults(app().state.settings.get().router).enabled; }
 
   function defaultPlaceholder() {
-    return routerOn() ? MC.ui.router.placeholder(app().state.settings.get()) : 'Ask all models…  (Enter to send, Shift+Enter for a new line)';
+    return app().needsRouting() ? MC.ui.router.placeholder(app().state.settings.get()) : 'Ask all models…  (Enter to send, Shift+Enter for a new line)';
+  }
+
+  // In a chat that already has messages the router only acts when armed.
+  function rerouteState() {
+    const conv = app().state.conv;
+    if (!conv || !conv.turns.length) return null;
+    return conv.rerouteNext ? 'armed' : 'idle';
   }
 
   // 🧭 chip while the router is on; its ✕ turns the router off.
@@ -37,15 +44,26 @@
     const settings = app().state.settings.get();
     const on = routerOn();
     const label = MC.ui.router.label(settings);
-    const key = on ? label + '|' + defaultPlaceholder() : '';
+    const rr = on ? rerouteState() : null;
+    const key = on ? label + '|' + rr + '|' + defaultPlaceholder() : '';
     if (key === view.routerKey) return;
     view.routerKey = key;
     clear(view.routerChip);
     view.routerChip.hidden = !on;
     if (on) {
-      view.routerChip.append(
-        h('button', { class: 'router-chip-open', title: 'Router settings', onclick: () => MC.ui.router.open() }, label),
-        h('button', { class: 'chip-x', 'aria-label': 'Turn the router off', onclick: turnRouterOff }, '✕'));
+      if (rr === 'idle') {
+        view.routerChip.append(
+          h('button', { class: 'router-chip-open', title: 'Router settings', onclick: () => MC.ui.router.open() }, '🧭 Routed'),
+          h('button', { class: 'router-reroute', title: 'Let the router pick the models again for your next message', onclick: () => app().armReroute(true) }, '· Re-route next'));
+      } else if (rr === 'armed') {
+        view.routerChip.append(
+          h('button', { class: 'router-chip-open', title: 'Router settings', onclick: () => MC.ui.router.open() }, '🧭 Next message is re-routed'),
+          h('button', { class: 'chip-x', 'aria-label': 'Cancel the re-route', onclick: () => app().armReroute(false) }, '✕'));
+      } else {
+        view.routerChip.append(
+          h('button', { class: 'router-chip-open', title: 'Router settings', onclick: () => MC.ui.router.open() }, label),
+          h('button', { class: 'chip-x', 'aria-label': 'Turn the router off', onclick: turnRouterOff }, '✕'));
+      }
     }
     if (!view.target) view.ta.placeholder = defaultPlaceholder();
   }
@@ -116,7 +134,7 @@
     if ((!text && !view.files.length) || busy() || view.sending) return;
     if (!app().state.settings.getKey()) { toast('Add your OpenRouter API key first', 'warn'); MC.ui.settings.open(); return; }
     // The router handles messages to everyone; a targeted message bypasses it.
-    const routed = !view.target && routerOn();
+    const routed = !view.target && app().needsRouting();
     if (view.files.length || routed) {
       const target = view.target;
       // Reading, routing, the capability question and saving take a while
