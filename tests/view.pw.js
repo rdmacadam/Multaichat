@@ -230,6 +230,44 @@ const cases = {
     await allDone(page, 1);
     assert.equal(await count(page, '.turn .cell.status-done'), 3);
   },
+  async 'compare does not rebuild for hidden models or TL;DR'(page) {
+    await ask(page, 'Warm up');
+    await allDone(page, 1);
+    await toColumns(page);
+    await page.locator('.compare-col').nth(1).locator('.lane-hide').click();
+    await page.evaluate(() => {
+      window.__rebuilds = 0;
+      new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.classList && n.classList.contains('compare')) window.__rebuilds++; })
+        .observe(document.getElementById('chat'), { childList: true });
+    });
+    await ask(page);
+    await page.waitForFunction(() => document.querySelectorAll('.col-answer').length === 4 && !document.querySelector('.col-answer.status-streaming'));
+    await page.waitForFunction(() => !MC.app.state.runner.isBusy());
+    const afterTurn = await page.evaluate(() => window.__rebuilds);
+    assert.ok(afterTurn <= 2, 'rebuilds during a turn: ' + afterTurn);
+    await page.evaluate(() => MC.app.state.runner.runTldr(MC.app.state.conv, MC.app.state.conv.turns[1].id, MC.app.state.settings.get().summaryModel));
+    assert.equal(await page.evaluate(() => window.__rebuilds), afterTurn, 'TL;DR tokens do not rebuild compare');
+  },
+
+  async 'fullscreen keeps the reading position when the answer finishes'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    await page.locator('.cell').first().locator('button.fs-open').click();
+    await page.waitForSelector('#answer-dialog[open]');
+    const pos = await page.evaluate(() => {
+      const conv = MC.app.state.conv; const t = conv.turns[0]; const id = conv.lanes[0].id; const r = t.responses[id];
+      const done = r.content; r.status = 'streaming';
+      MC.ui.fullscreen.update(conv, t.id, id);
+      const body = document.querySelector('#answer-dialog .fs-body');
+      body.scrollTop = 800;
+      const before = body.scrollTop;
+      r.status = 'done'; r.content = done;
+      MC.ui.fullscreen.update(conv, t.id, id);
+      return { before, after: document.querySelector('#answer-dialog .fs-body').scrollTop };
+    });
+    assert.ok(pos.before > 0, 'answer long enough to scroll');
+    assert.equal(pos.after, pos.before);
+  },
 };
 cases['phone width renders rows even with Compare saved'].init = { 'mc.settings': JSON.stringify({ chatView: 'columns' }) };
 cases['columns keep min width'].init = { 'mc.settings': JSON.stringify({ selected: SIX }) };
@@ -238,6 +276,7 @@ cases['columns scroll independently'].opts = { longAnswers: true };
 cases['clicking Message 2 aligns all columns'].opts = { longAnswers: true };
 cases['streaming text appears in its column'].opts = { delay: 1500 };
 cases['switch view while streaming'].opts = { delay: 1500 };
+cases['fullscreen keeps the reading position when the answer finishes'].opts = { longAnswers: true };
 
 (async () => {
   const browser = await chromium.launch();

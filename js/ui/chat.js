@@ -409,6 +409,7 @@
   }
 
   function updateDerived(conv, turnId) {
+    if (isCompare()) return; // TL;DR, Fusion and judge are shown in By message only
     const el = document.querySelector(`#chat [data-derived="${turnId}"]`);
     const turn = MC.conv.turnById(conv, turnId);
     if (!el || !turn) { render(conv); return; }

@@ -112,7 +112,10 @@
     const el = root.querySelector(`.col-answer[data-answer="${turnId}:${laneId}"]`);
     const turn = MC.conv.turnById(conv, turnId);
     const lane = MC.conv.laneById(conv, laneId);
-    if (!el || !turn || !lane) { chat().render(conv); return; }
+    if (!turn || !lane) return;
+    // Hidden columns have nothing to update; only rebuild when a visible
+    // column is missing this answer (e.g. a new turn).
+    if (!el) { if (visibleColumns(conv).some((l) => l.id === laneId)) chat().render(conv); return; }
     const r = turn.responses[laneId];
     const body = el.closest('.col-body');
     const follow = body && atBottom(body);

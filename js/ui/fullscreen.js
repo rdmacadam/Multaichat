@@ -73,8 +73,13 @@
     if (!dlg() || !dlg().open || view.conv !== conv || view.turnId !== turnId || view.laneId !== laneId) return;
     const c = current();
     const md = dlg().querySelector('.fs-body .md');
-    if (c && md && c.r && c.r.status === 'streaming' && c.r.content) md.innerHTML = MC.md.render(c.r.content);
-    else render();
+    if (c && md && c.r && c.r.status === 'streaming' && c.r.content) { md.innerHTML = MC.md.render(c.r.content); return; }
+    // Status changed (done, error, …): redraw but keep the reading position.
+    const body = dlg().querySelector('.fs-body');
+    const top = body ? body.scrollTop : 0;
+    render();
+    const next = dlg().querySelector('.fs-body');
+    if (next) next.scrollTop = top;
   }
 
   document.addEventListener('keydown', (e) => {
