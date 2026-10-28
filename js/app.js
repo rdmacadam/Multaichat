@@ -359,7 +359,7 @@
       if (choice.action === 'selection') {
         const sent = files.length ? await sendWithAttachments(text, files) : !!sendBroadcast(text);
         // The decision was paid for: it counts in the chat the message went to.
-        keepUnsentCost(sent ? state.conv : startConv || startHolder, route);
+        keepUnsentCost(state.conv || startHolder, route);
         return sent;
       }
       picks = choice.picks;
@@ -369,7 +369,7 @@
     if (blockedByBusy()) return discard();
     const conv = ensureConv();
     const laneIds = MC.conv.ensureLanes(conv, picks.map((m) => ({ id: m.id, name: m.name })));
-    if (!await storeAttachments(read)) return discard();
+    if (!await storeAttachments(read)) { keepUnsentCost(conv, route); return false; }
     // Image capability was enforced by the pool: no lane is "incapable".
     const { inputs, delivery } = MC.attach.buildInputs({ text, refs, textContents, laneIds, incapableIds: [], choice: null });
     const p = sendTurn('broadcast', inputs, { attachments: refs, delivery, route }, conv);

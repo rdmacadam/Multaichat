@@ -64,15 +64,21 @@ Plain HTML/CSS/JavaScript with no build step and no dependencies. It runs entire
 
 ## Notes
 - **Router.** Instead of picking models yourself, turn on 🧭 in the toolbar and let a decision model choose which models answer each message.
-  - **Modes:** *Full auto* (the top picks), *Diverse* (different providers), *Best free* (free models only), *Very best answer* (see extras below), *Manual* (you choose the number; nothing is decided for you) and *OpenRouter Auto* (OpenRouter's own router, which answers with one model).
+  - **Modes** (each has an ⓘ in the 🧭 panel):
+    - *Full auto* — the decision model picks the best models for this message, weighing answer quality against price.
+    - *Diverse perspectives* — strong models from different providers, so you see different viewpoints. Pairs well with Fusion.
+    - *Best free* — only free models are considered, and a free decision model picks among them. If no free decision model works, the newest free models are picked by simple rules, so this mode stays free.
+    - *Very best answer* — the strongest models for this message, ignoring price; optionally fuses their answers or lets a judge mark the best one (see extras below).
+    - *Full manual* — you choose the models the router may pick from and the decision model; the decision model still picks among them.
+    - *OpenRouter native* — OpenRouter's own Auto Router picks one model per message from your allowed pool; the answer shows which model was used.
   - **Pool:** pick from the whole catalog or only from the models in your toolbar. The picker filters (price, context, images, files) also apply, and a message with images never goes to a model that can't read them.
-  - **Count:** how many models answer (1 to 8; OpenRouter Auto always uses 1).
+  - **Count:** how many models answer (1 to 8; OpenRouter native always uses 1, and your saved number comes back when you switch to another mode).
   - **Decision models and stars:** the decision models come live from OpenRouter. Star the ones you like; the router uses your default (or the first starred one) and tries one more starred model if it fails, then falls back to simple rules.
   - **Preview:** optionally see the picks before sending, remove some, or send to your own selection instead.
-  - **Very best answer extras:** after the answers finish, *Fuse the answers* runs a Fusion, and *Judge* asks a decision model which answer is best. The winner shows 🏆 best (with its probability); **Judge again** in the route bar asks anew.
-  - **Costs of decisions:** each decision is a small paid request (free ones cost nothing). Its cost is shown in the route bar and counted in the chat total.
+  - **Very best answer extras:** after the answers finish, *Fuse the answers* runs a Fusion, and *Judge* asks a decision model which answer is best. The winner shows 🏆 best (with its probability when the decision model gives one); **Judge again** in the route bar asks anew.
+  - **Costs of decisions:** each decision is a small paid request (free ones cost nothing). Its cost is shown in the route bar ("free" when it cost nothing) and counted in the chat total, even when you cancel the preview or send to your own selection instead.
   - Every turn shows a route bar above the answers: the mode, decision model, task, cost, time and each pick's probability, plus the candidates that were considered.
-- **Σ cost counter.** The top bar shows what the current chat has cost so far, including router decisions, TL;DR, Fusion and the judge. Hover or tap it for the breakdown. A leading ≥ means some requests had no price from OpenRouter.
+- **Σ cost counter.** The top bar shows what the current chat has cost so far, including router decisions, TL;DR, Fusion and the judge. Hover over it, or hover/tap the ⓘ next to it, for the breakdown. A leading ≥ means some requests had no price from OpenRouter.
 
 - Free models are rate-limited by OpenRouter. When one hits the limit, its column offers **Use paid variant** if a paid version of that model exists.
 - Fusion asks the model for JSON output. Models that can't produce it show their raw reply with a *Regenerate* option.
