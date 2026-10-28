@@ -459,3 +459,13 @@ test('withDefaults merges extras and clamps count; native keeps the stored count
   a.manualPool.push('x');
   assert.deepEqual(Router.withDefaults({}).manualPool, []);
 });
+
+test('candidates never include openrouter/free or safety classifiers', () => {
+  const pool = MC.models.normalize([
+    { id: 'openrouter/free', name: 'Free Models Router', pricing: { prompt: '0', completion: '0' } },
+    { id: 'nvidia/nemotron-3.5-content-safety:free', name: 'Content Safety (free)', context_length: 128000, pricing: { prompt: '0', completion: '0' } },
+    { id: 'poolside/laguna-s-2.1:free', name: 'Laguna S 2.1 (free)', context_length: 262144, pricing: { prompt: '0', completion: '0' } },
+  ]);
+  const r = Router.candidates(pool, { mode: 'diverse', pool: 'catalog', filters: { maxIn: '0', maxOut: '0' }, attachments: [] });
+  assert.deepEqual(r.list.map((m) => m.id), ['poolside/laguna-s-2.1:free']);
+});

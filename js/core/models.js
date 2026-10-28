@@ -18,7 +18,7 @@
   const OPEN_PROVIDERS = ['meta-llama', 'mistralai', 'qwen', 'deepseek', 'google/gemma*', 'microsoft', 'nvidia',
     'nousresearch', 'moonshotai', 'z-ai', 'thudm', 'minimax', 'allenai', 'openai/gpt-oss*', 'cohere/command-r7b*',
     'ibm-granite', 'baidu', 'tencent', 'liquid'];
-  const EXCLUDE = /preview|beta|-exp|:extended|audio|image|embed|guard/i;
+  const EXCLUDE = /preview|beta|-exp|:extended|audio|image|embed|guard|safety/i;
 
   const FALLBACK_RAW = [
     ['anthropic/claude-sonnet-4.5', 'Anthropic: Claude Sonnet 4.5', '0.000003', '0.000015', 200000],
@@ -70,7 +70,9 @@
           inputs: ins,
           images: ins.includes('image'),
           files: ins.includes('file'),
-          router: Number(r.pricing && r.pricing.prompt) < 0,
+          // Router-type models (OpenRouter's own routers, or anything priced
+          // per selected model, listed as negative) are never routing targets.
+          router: r.id.startsWith('openrouter/') || Number(r.pricing && r.pricing.prompt) < 0,
           desc: shortDesc(r.description),
           isNew(now = Date.now()) { return created > 0 && now - created <= 30 * DAY; },
         };

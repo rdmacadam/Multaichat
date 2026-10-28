@@ -248,3 +248,24 @@ test('loadDeciders caches for 24 h, refetches when stale, falls back to stale ca
   const r4 = await M.loadDeciders({ ls: memoryStorage(), now: NOW, fetchDecidersFn: fail });
   assert.deepEqual(r4, { deciders: [], stale: true, source: 'none' });
 });
+
+test('openrouter/* models count as routers even when free', () => {
+  const [free, auto, other] = M.normalize([
+    { id: 'openrouter/free', name: 'Free Models Router', pricing: { prompt: '0', completion: '0' } },
+    { id: 'openrouter/auto', name: 'Auto Router', pricing: { prompt: '-1', completion: '-1' } },
+    { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', name: 'Nemotron 3 Ultra (free)', pricing: { prompt: '0', completion: '0' } },
+  ]);
+  assert.equal(free.router, true);
+  assert.equal(auto.router, true);
+  assert.equal(other.router, false);
+});
+
+test('safety classifiers are left out of the suggestion sections', () => {
+  const now = Date.now();
+  const ms = M.normalize([
+    { id: 'nvidia/nemotron-3.5-content-safety:free', name: 'Nemotron Content Safety (free)', created: now / 1000, context_length: 128000, pricing: { prompt: '0', completion: '0' } },
+    { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', name: 'Nemotron 3 Ultra (free)', created: now / 1000, context_length: 128000, pricing: { prompt: '0', completion: '0' } },
+  ]);
+  assert.deepEqual(M.sections(ms, now).free.map((m) => m.id), ['nvidia/nemotron-3-ultra-550b-a55b:free']);
+  assert.match('nvidia/nemotron-3.5-content-safety:free', M.EXCLUDE);
+});

@@ -268,6 +268,20 @@ const cases = {
     assert.ok(pos.before > 0, 'answer long enough to scroll');
     assert.equal(pos.after, pos.before);
   },
+  async 'not-asked text sits at the top of a tall row'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    await page.locator('#topbar .chip').nth(1).locator('.chip-x').click();
+    await ask(page, 'Second');
+    await allDone(page, 2);
+    const off = await page.evaluate(() => {
+      const cell = document.querySelectorAll('.turn')[1].querySelector('.cell.not-asked');
+      const text = cell.querySelector('span');
+      return { cell: cell.getBoundingClientRect().height, gap: text.getBoundingClientRect().top - cell.getBoundingClientRect().top };
+    });
+    assert.ok(off.cell > 400, 'row is tall: ' + off.cell);
+    assert.ok(off.gap < 40, 'text near the top, gap ' + off.gap);
+  },
 };
 cases['phone width renders rows even with Compare saved'].init = { 'mc.settings': JSON.stringify({ chatView: 'columns' }) };
 cases['columns keep min width'].init = { 'mc.settings': JSON.stringify({ selected: SIX }) };
@@ -276,6 +290,7 @@ cases['columns scroll independently'].opts = { longAnswers: true };
 cases['clicking Message 2 aligns all columns'].opts = { longAnswers: true };
 cases['streaming text appears in its column'].opts = { delay: 1500 };
 cases['switch view while streaming'].opts = { delay: 1500 };
+cases['not-asked text sits at the top of a tall row'].opts = { longAnswers: true };
 cases['fullscreen keeps the reading position when the answer finishes'].opts = { longAnswers: true };
 
 (async () => {

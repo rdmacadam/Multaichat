@@ -114,7 +114,7 @@ body.side-hidden #sidebar { visibility: hidden; }
 .prompt { display: grid; justify-items: end; gap: 2px; }
 .bubble { background: var(--accent-soft); padding: 8px 14px; border-radius: 14px 14px 4px 14px; max-width: min(760px, 90%); white-space: pre-wrap; overflow-wrap: anywhere; }
 .cell { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.cell.not-asked { background: transparent; border-style: dashed; justify-content: center; align-items: center; min-height: 44px; }
+.cell.not-asked { background: transparent; border-style: dashed; justify-content: flex-start; align-items: center; min-height: 44px; }
 .cell.status-error { border-color: var(--danger); }
 .cell-head { display: none; align-items: center; justify-content: space-between; gap: 8px; }
 .cell-head .cell-status, .cell-status { display: flex; gap: 8px; align-items: center; }
