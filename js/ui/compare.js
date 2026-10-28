@@ -23,13 +23,18 @@
       h('div', { class: 'col-actions' }, actions));
   }
 
-  function column(conv, lane, i) {
+  function column(conv, lane, i, onlyOne) {
     const turns = conv.turns.filter((t) => lane.id in t.inputs && t.responses[lane.id]);
     return h('section', { class: 'compare-col', dataset: { lane: lane.id } },
       h('div', { class: 'col-head' },
         h('span', { class: 'lane-num' }, String(i + 1)),
         h('span', { class: 'lane-name', title: lane.modelId }, shortName(lane.modelName)),
-        lane.active ? null : h('span', { class: 'muted small' }, 'removed')),
+        lane.active ? null : h('span', { class: 'muted small' }, 'removed'),
+        h('button', {
+          class: 'icon small lane-hide', 'aria-label': 'Hide ' + shortName(lane.modelName),
+          title: onlyOne ? 'At least one model stays visible' : 'Hide this model', disabled: onlyOne,
+          onclick: () => MC.app.toggleLaneHidden(lane.id),
+        }, '👁')),
       h('div', { class: 'col-body' }, turns.map((t) => h('div', { class: 'col-turn' },
         h('button', { class: 'msg-mark', dataset: { turn: t.id }, title: 'Line up all columns at this message', onclick: () => MC.ui.compare.alignTo(t.id) }, 'Message ' + (t.index + 1)),
         h('div', { class: 'col-input' },
@@ -38,10 +43,30 @@
         answerEl(conv, t, lane)))));
   }
 
-  function columns(conv) { return chat().visibleLanes(conv); }
+  // Visible lanes minus the ones hidden in this chat. Ids of lanes that no
+  // longer exist are ignored, and hiding never leaves zero columns.
+  function visibleColumns(conv) {
+    const lanes = chat().visibleLanes(conv);
+    const hidden = new Set(conv.hiddenLanes || []);
+    const shown = lanes.filter((l) => !hidden.has(l.id));
+    return shown.length ? shown : lanes;
+  }
+
+  function hiddenList(conv) {
+    const shown = new Set(visibleColumns(conv).map((l) => l.id));
+    const hidden = chat().visibleLanes(conv).filter((l) => !shown.has(l.id));
+    if (!hidden.length) return null;
+    return h('div', { class: 'hidden-list' }, h('span', { class: 'muted small' }, 'Hidden:'),
+      hidden.map((l) => h('span', { class: 'chip hidden-chip' }, shortName(l.modelName),
+        h('button', { class: 'chip-x', 'aria-label': 'Show ' + shortName(l.modelName), title: 'Show again', onclick: () => MC.app.toggleLaneHidden(l.id) }, 'show'))));
+  }
 
   function render(conv, root) {
-    root.append(h('div', { class: 'compare' }, columns(conv).map((l, i) => column(conv, l, i))));
+    const list = hiddenList(conv);
+    const bar = root.querySelector('.view-bar');
+    if (list && bar) bar.append(list);
+    const cols = visibleColumns(conv);
+    root.append(h('div', { class: 'compare' }, cols.map((l, i) => column(conv, l, i, cols.length === 1))));
     root.querySelectorAll('.col-body').forEach((b) => { b.scrollTop = b.scrollHeight; });
   }
 
@@ -59,5 +84,5 @@
   function alignTo() {}
 
   MC.ui = MC.ui || {};
-  MC.ui.compare = { render, updateCell, alignTo };
+  MC.ui.compare = { render, updateCell, alignTo, visibleColumns };
 })(window.MC);

@@ -169,6 +169,22 @@
     MC.ui.chat.render(state.conv);
   }
 
+  // Hide or show a model's column in the compare view (saved with the chat).
+  function toggleLaneHidden(laneId) {
+    const conv = state.conv;
+    if (!conv) return;
+    const hidden = new Set(conv.hiddenLanes || []);
+    if (hidden.has(laneId)) hidden.delete(laneId);
+    else {
+      const shown = MC.ui.compare.visibleColumns(conv).filter((l) => l.id !== laneId);
+      if (!shown.length) return;
+      hidden.add(laneId);
+    }
+    conv.hiddenLanes = [...hidden];
+    save(conv);
+    MC.ui.chat.render(conv);
+  }
+
   function setChatSystemPrompt(text, presetId) {
     if (state.conv) { MC.conv.setSystemPrompt(state.conv, text, presetId); save(state.conv); }
     else {
@@ -562,7 +578,7 @@
   }
 
   MC.app = {
-    setChatView,
+    setChatView, toggleLaneHidden,
     state, start, refresh, modelById, refreshModels, refreshDeciders, openModelPicker, setSelection, addModel, removeModel,
     sendBroadcast, sendTargeted, sendBatch, openConversation, newChat, deleteConversation, renameConversation,
     importConversations, forkAt, save, ensureConv, applyPreset, setChatSystemPrompt, promptHolder, sendWithAttachments, updateCost,

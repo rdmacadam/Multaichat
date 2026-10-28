@@ -138,6 +138,48 @@ const cases = {
     assert.ok(widths.every((w) => w >= 319), 'widths ' + widths.join(','));
     assert.ok(await page.evaluate(() => { const c = document.querySelector('.compare'); return c.scrollWidth > c.clientWidth; }));
   },
+  async 'hiding a model removes its column; show brings it back; saved per chat'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    await toColumns(page);
+    const first = (await page.locator('.compare-col .lane-name').first().textContent()).trim();
+    await page.locator('.compare-col').first().locator('.lane-hide').click();
+    assert.equal(await count(page, '.compare-col'), 2);
+    assert.match(await page.locator('.hidden-chip').first().textContent(), new RegExp(first));
+    await page.reload();
+    await page.waitForSelector('.compare-col');
+    assert.equal(await count(page, '.compare-col'), 2);
+    await page.click('#sidebar button:has-text("New chat")');
+    await ask(page, 'Other chat');
+    await page.waitForFunction(() => document.querySelectorAll('.compare .col-answer').length === 3 && !document.querySelector('.col-answer.status-streaming'));
+    assert.equal(await count(page, '.compare-col'), 3, 'a new chat shows all models');
+    await page.locator('#sidebar li.conv .conv-open').filter({ hasText: 'Hello' }).first().click();
+    await page.waitForFunction(() => document.querySelectorAll('.compare-col').length === 2);
+    await page.locator('.hidden-chip button').first().click();
+    assert.equal(await count(page, '.compare-col'), 3);
+  },
+
+  async 'the last visible model cannot be hidden'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    await toColumns(page);
+    await page.locator('.compare-col').first().locator('.lane-hide').click();
+    await page.locator('.compare-col').first().locator('.lane-hide').click();
+    assert.equal(await count(page, '.compare-col'), 1);
+    const last = page.locator('.compare-col .lane-hide');
+    assert.equal(await last.isDisabled(), true);
+    await last.click({ force: true });
+    assert.equal(await count(page, '.compare-col'), 1);
+  },
+
+  async 'stale hidden ids are ignored'(page) {
+    await ask(page);
+    await allDone(page, 1);
+    await toColumns(page);
+    await page.evaluate(() => { MC.app.state.conv.hiddenLanes = ['l_missing']; MC.ui.chat.render(MC.app.state.conv); });
+    assert.equal(await count(page, '.compare-col'), 3);
+    assert.equal(await count(page, '.hidden-chip'), 0);
+  },
 };
 cases['phone width renders rows even with Compare saved'].init = { 'mc.settings': JSON.stringify({ chatView: 'columns' }) };
 cases['columns keep min width'].init = { 'mc.settings': JSON.stringify({ selected: SIX }) };
